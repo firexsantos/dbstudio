@@ -183,3 +183,13 @@ build/               app icons
 Developed by **Firman Santosa** — [sifirman.com](https://sifirman.com) · admin@sifirman.com
 
 Released under the [MIT License](LICENSE).
+
+<br>
+
+<h3 align="center">🤝 Support My Work</h3>
+
+<p align="center">
+  <a href="https://buymeacoffee.com/firexsantos"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee"></a>
+  &nbsp;
+  <a href="https://paypal.me/firexserv"><img src="https://img.shields.io/badge/PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white" alt="PayPal"></a>
+</p>
