@@ -1,25 +1,28 @@
 // Query tabs: editor, run / run current / explain / format, results grid, history & favorites.
 import {
   $, h, icon, esc, api, state, app, on, local, toast, modal, promptDialog, copyText, debounce, clamp, fmtNum,
-  statementRanges, createEditor, CM_MODE, TYPE_LABEL, downloadText, timeAgo,
+  statementRanges, createEditor, CM_MODE, TYPE_LABEL, downloadText, timeAgo, segmented,
 } from './core.js';
 import { addTab, activateTab, renderTabs } from './tabs.js';
 import { renderGrid, nextSort, cmpValues, toCSV } from './grid.js';
 import { formatSQL } from './sqlfmt.js';
+import { mountChart } from './charts.js';
+import { exportMenu } from './exporters.js';
 import { countUp } from './fx.js';
+import { t, plural } from './i18n.js';
 
 const saveTabs = debounce(() => {
   local.set(
     'dbs-queries',
-    state.tabs.filter((t) => t.kind === 'query' && t.cm).map((t) => ({ title: t.title, sql: t.cm.getValue() })),
+    state.tabs.filter((x) => x.kind === 'query' && x.cm).map((x) => ({ title: x.title, sql: x.cm.getValue() })),
   );
 }, 300);
 on('tabs-changed', saveTabs);
 
 function nextQueryNo() {
   let m = 0;
-  for (const t of state.tabs) {
-    const x = /^Query (\d+)$/.exec(t.title);
+  for (const tab of state.tabs) {
+    const x = /^Query (\d+)$/.exec(tab.title);
     if (x) m = Math.max(m, Number(x[1]));
   }
   return m + 1;
@@ -32,20 +35,19 @@ export function newQueryTab(sql = '', runNow = false, title = null, { activate =
   const toolbar = h(
     'div',
     { class: 'toolbar' },
-    btn('run', 'play', 'Jalankan', 'Ctrl+Enter — seleksi, atau seluruh editor', 'primary'),
-    btn('run-current', 'text-cursor', 'Statement ini', 'F9 / Ctrl+Shift+Enter'),
-    btn('explain', 'scan-search', 'Explain', 'Rencana eksekusi statement di kursor'),
+    btn('run', 'play', t('Run'), t('Ctrl+Enter — selection, or the whole editor'), 'primary'),
+    btn('run-current', 'text-cursor', t('This statement'), 'F9 / Ctrl+Shift+Enter'),
+    btn('explain', 'scan-search', t('Explain'), t('Execution plan for the statement at the cursor')),
     h('span', { class: 'sep' }),
-    btn('format', 'wand-sparkles', 'Rapikan', 'Format SQL (Ctrl+Shift+F)'),
-    btn('history', 'history', '', 'Riwayat & favorit'),
-    btn('star', 'star', '', 'Simpan sebagai favorit'),
+    btn('format', 'wand-sparkles', t('Tidy'), t('Format SQL (Ctrl+Shift+F)')),
+    btn('history', 'history', '', t('History & favorites')),
+    btn('star', 'star', '', t('Save as favorite')),
     h('span', { class: 'spacer' }),
     ctx,
-    btn('csv', 'file-spreadsheet', 'CSV', 'Ekspor hasil ke CSV'),
-    btn('json', 'braces', 'JSON', 'Salin hasil sebagai JSON'),
+    btn('export', 'download', t('Export'), 'Excel, CSV, JSON, Markdown, HTML, SQL'),
   );
   const editorWrap = h('div', { class: 'editor-wrap' });
-  const split = h('div', { class: 'hsplit', title: 'Seret untuk mengubah ukuran' });
+  const split = h('div', { class: 'hsplit', title: t('Drag to resize') });
   const results = h('div', { class: 'results' }, emptyResult());
   panel.append(toolbar, editorWrap, split, results);
 
@@ -64,7 +66,7 @@ export function newQueryTab(sql = '', runNow = false, title = null, { activate =
     },
     onClose: () => setTimeout(saveTabs),
     rename: async () => {
-      const name = await promptDialog({ title: 'Ganti nama tab', label: 'Nama', value: tab.title });
+      const name = await promptDialog({ title: t('Rename tab'), label: t('Name'), value: tab.title });
       if (name) {
         tab.title = name;
         renderTabs();
@@ -124,8 +126,7 @@ export function newQueryTab(sql = '', runNow = false, title = null, { activate =
   act('format').onclick = () => formatTab(tab);
   act('history').onclick = () => openHistory(tab);
   act('star').onclick = () => saveFavorite(tab);
-  act('csv').onclick = () => tab.result && downloadText(tab.title.replace(/[^\w.-]+/g, '_') + '.csv', toCSV(tab.result.columns, sortedRows(tab)), 'text/csv');
-  act('json').onclick = () => tab.result && copyText(JSON.stringify(sortedRows(tab).map((r) => Object.fromEntries(tab.result.columns.map((c, i) => [c, r[i]]))), null, 2));
+  act('export').onclick = (e) => tab.result && exportMenu(e, { columns: tab.result.columns, rows: sortedRows(tab), name: tab.title, type: state.active?.conn.type });
   setExportEnabled(tab);
   updateCtx(tab);
   saveTabs();
@@ -134,31 +135,30 @@ export function newQueryTab(sql = '', runNow = false, title = null, { activate =
 }
 
 function emptyResult() {
-  return h('div', { class: 'empty', style: { flex: 1 } }, h('div', { html: icon('sparkles') }), h('div', { html: 'Tulis SQL lalu tekan <kbd>Ctrl</kbd> + <kbd>Enter</kbd>' }));
+  return h('div', { class: 'empty', style: { flex: 1 } }, h('div', { html: icon('sparkles') }), h('div', { html: t('Write SQL, then press <kbd>Ctrl</kbd> + <kbd>Enter</kbd>') }));
 }
 
 function updateCtx(tab) {
   const a = state.active;
   tab.ctx.innerHTML = a
     ? `${icon('database')} ${esc(a.conn.name)}${a.conn.type !== 'sqlite' ? ' / ' + esc(a.ns) : ''}`
-    : `${icon('unplug')} tidak terhubung`;
+    : `${icon('unplug')} ${t('not connected')}`;
   tab.cm?.setOption('mode', CM_MODE[a?.conn.type || 'mysql']);
 }
-on('connected', () => state.tabs.filter((t) => t.kind === 'query').forEach(updateCtx));
-on('ns', () => state.tabs.filter((t) => t.kind === 'query').forEach(updateCtx));
-on('tree', () => state.tabs.filter((t) => t.kind === 'query').forEach((t) => t.cm?.setOption('hintOptions', { tables: state.columns, completeSingle: false })));
+on('connected', () => state.tabs.filter((x) => x.kind === 'query').forEach(updateCtx));
+on('ns', () => state.tabs.filter((x) => x.kind === 'query').forEach(updateCtx));
+on('tree', () => state.tabs.filter((x) => x.kind === 'query').forEach((x) => x.cm?.setOption('hintOptions', { tables: state.columns, completeSingle: false })));
 
 function setExportEnabled(tab) {
   const has = Boolean(tab.result?.columns?.length);
-  tab.panel.querySelector('[data-act="csv"]').disabled = !has;
-  tab.panel.querySelector('[data-act="json"]').disabled = !has;
+  tab.panel.querySelector('[data-act="export"]').disabled = !has;
 }
 
 function formatTab(tab) {
   const cm = tab.cm;
   if (cm.somethingSelected()) cm.replaceSelection(formatSQL(cm.getSelection()));
   else cm.setValue(formatSQL(cm.getValue()));
-  toast('SQL dirapikan', 'ok', { timeout: 1400 });
+  toast(t('SQL formatted'), 'ok', { timeout: 1400 });
 }
 
 function statementAtCursor(cm) {
@@ -183,20 +183,20 @@ function sortedRows(tab) {
 export async function runQuery(tab, mode) {
   const a = state.active;
   if (!a) {
-    toast('Pilih koneksi di panel kiri terlebih dahulu.', 'err', { title: 'Belum terhubung' });
+    toast(t('Pick a connection in the left panel first.'), 'err', { title: t('Not connected') });
     app.showPanel('connections');
     return;
   }
   const cm = tab.cm;
   let sql = mode === 'auto' ? (cm.somethingSelected() ? cm.getSelection() : cm.getValue()) : statementAtCursor(cm);
-  if (!sql.trim()) return toast('Tidak ada SQL untuk dijalankan', 'err');
+  if (!sql.trim()) return toast(t('No SQL to run'), 'err');
   if (mode === 'explain') sql = (a.conn.type === 'sqlite' ? 'EXPLAIN QUERY PLAN ' : 'EXPLAIN ') + sql.replace(/;\s*$/, '');
   const res = tab.panel.querySelector('.results');
   const wrap = tab.panel.querySelector('.editor-wrap');
   const runBtn = tab.panel.querySelector('[data-act="run"]');
   wrap.classList.add('running');
   runBtn.classList.add('loading');
-  runBtn.innerHTML = icon('loader-circle') + '<span>Berjalan…</span>';
+  runBtn.innerHTML = icon('loader-circle') + `<span>${t('Running…')}</span>`;
   const t0 = performance.now();
   try {
     const r = await api('POST', `/api/c/${a.conn.id}/query`, { sql, ns: a.ns });
@@ -214,29 +214,48 @@ export async function runQuery(tab, mode) {
   } finally {
     wrap.classList.remove('running');
     runBtn.classList.remove('loading');
-    runBtn.innerHTML = icon('play') + '<span>Jalankan</span>';
+    runBtn.innerHTML = icon('play') + `<span>${t('Run')}</span>`;
     setExportEnabled(tab);
   }
 }
+
+const COUNT = '<b class="count-up">0</b>';
 
 function renderResult(tab, fresh = false) {
   const r = tab.result;
   const res = tab.panel.querySelector('.results');
   res.innerHTML = '';
   const status = h('div', { class: 'result-status' });
-  const multi = r.statements > 1 ? `<span class="chip">${icon('layers')} ${r.statements} statement · hasil terakhir</span>` : '';
+  const multi = r.statements > 1 ? `<span class="chip">${icon('layers')} ${plural(r.statements, '{n} statement · last result', '{n} statements · last result')}</span>` : '';
   if (!r.columns.length) {
-    status.innerHTML = `<span class="chip ok">${icon('check')} ${esc(r.command || 'OK')}</span><span class="chip"><b class="count-up">0</b>&nbsp;baris terpengaruh</span>${
+    status.innerHTML = `<span class="chip ok">${icon('check')} ${esc(r.command || 'OK')}</span><span class="chip">${plural(r.affected ?? 0, '{count}&nbsp;row affected', '{count}&nbsp;rows affected', { count: COUNT })}</span>${
       r.insertId ? `<span class="chip">insert id ${esc(r.insertId)}</span>` : ''
     }<span class="chip">${icon('timer')} ${r.ms} ms</span>${multi}`;
-    res.append(status, h('div', { class: 'empty', style: { flex: 1 } }, h('div', { html: icon('circle-check-big') }), h('div', { text: 'Query berhasil dijalankan.' })));
+    res.append(status, h('div', { class: 'empty', style: { flex: 1 } }, h('div', { html: icon('circle-check-big') }), h('div', { text: t('Query ran successfully.') })));
     countUp(status.querySelector('.count-up'), r.affected ?? 0);
     return;
   }
-  status.innerHTML = `<span class="chip ok">${icon('check')} <b class="count-up">0</b>&nbsp;baris</span><span class="chip">${icon('columns-3')} ${r.columns.length} kolom</span><span class="chip">${icon('timer')} ${r.ms} ms</span>${multi}`;
+  status.innerHTML = `<span class="chip ok">${icon('check')} ${plural(r.rows.length, '{count}&nbsp;row', '{count}&nbsp;rows', { count: COUNT })}</span><span class="chip">${icon('columns-3')} ${plural(r.columns.length, '{n} column', '{n} columns')}</span><span class="chip">${icon('timer')} ${r.ms} ms</span>${multi}<span class="spacer"></span>`;
+  const viewSeg = segmented(
+    [
+      { value: 'grid', label: t('Table'), icon: 'table' },
+      { value: 'chart', label: t('Chart'), icon: 'chart-column' },
+    ],
+    tab.view || 'grid',
+    (v) => {
+      tab.view = v;
+      renderResult(tab, v === 'grid');
+    },
+  );
+  status.append(viewSeg);
   const gw = h('div', { class: 'grid-wrap' });
   res.append(status, gw);
   countUp(status.querySelector('.count-up'), r.rows.length);
+  if (tab.view === 'chart') {
+    gw.classList.add('chart-host');
+    mountChart(gw, { columns: r.columns, rows: sortedRows(tab), title: tab.title });
+    return;
+  }
   renderGrid(gw, {
     columns: r.columns,
     rows: sortedRows(tab),
@@ -263,13 +282,13 @@ function addHistory(entry) {
 
 async function saveFavorite(tab) {
   const sql = tab.cm.somethingSelected() ? tab.cm.getSelection() : tab.cm.getValue();
-  if (!sql.trim()) return toast('Editor kosong', 'err');
-  const name = await promptDialog({ title: 'Simpan ke favorit', label: 'Nama query', value: tab.title, icon: 'star' });
+  if (!sql.trim()) return toast(t('The editor is empty'), 'err');
+  const name = await promptDialog({ title: t('Save to favorites'), label: t('Query name'), value: tab.title, icon: 'star' });
   if (!name) return;
   const favs = local.get('dbs-favorites', []);
   favs.unshift({ name, sql, at: Date.now(), type: state.active?.conn.type });
   local.set('dbs-favorites', favs.slice(0, 200));
-  toast(`"${name}" disimpan ke favorit`, 'ok');
+  toast(t('"{name}" saved to favorites', { name }), 'ok');
 }
 
 function insertSql(tab, sql) {
@@ -284,19 +303,19 @@ export function openHistory(tab) {
   let which = 'history';
   let q = '';
   const list = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '2px', minHeight: '300px' } });
-  const search = h('input', { class: 'input', placeholder: 'Cari SQL…' });
+  const search = h('input', { class: 'input', placeholder: t('Search SQL…') });
   const seg = h('div', { class: 'seg' });
   const render = () => {
     list.innerHTML = '';
     const items = (which === 'history' ? local.get('dbs-history', []) : local.get('dbs-favorites', [])).filter((x) => !q || (x.sql + ' ' + (x.name || '')).toLowerCase().includes(q));
     if (!items.length) {
-      list.append(h('div', { class: 'empty', html: `${icon(which === 'history' ? 'history' : 'star')}<div>${which === 'history' ? 'Belum ada riwayat.' : 'Belum ada favorit — klik ⭐ di toolbar query.'}</div>` }));
+      list.append(h('div', { class: 'empty', html: `${icon(which === 'history' ? 'history' : 'star')}<div>${which === 'history' ? t('No history yet.') : t('No favorites yet — click ⭐ in the query toolbar.')}</div>` }));
       return;
     }
     items.slice(0, 150).forEach((x, i) => {
       const meta =
         which === 'history'
-          ? `${esc(timeAgo(x.at))} · ${esc(x.conn)}${x.ns ? ' / ' + esc(x.ns) : ''} · ${x.ok ? `<span class="chip ok">${x.ms} ms</span>` : `<span class="chip danger">error</span> <span class="faint">${esc(String(x.error).slice(0, 90))}</span>`}`
+          ? `${esc(timeAgo(x.at))} · ${esc(x.conn)}${x.ns ? ' / ' + esc(x.ns) : ''} · ${x.ok ? `<span class="chip ok">${x.ms} ms</span>` : `<span class="chip danger">${t('error')}</span> <span class="faint">${esc(String(x.error).slice(0, 90))}</span>`}`
           : `<b>${esc(x.name)}</b> · ${esc(timeAgo(x.at))}`;
       const item = h('div', { class: 'history-item', style: { '--i': i } }, h('div', { class: 'h-sql', text: x.sql }), h('div', { class: 'h-meta', html: meta }));
       item.onclick = () => {
@@ -314,7 +333,7 @@ export function openHistory(tab) {
       list.append(item);
     });
   };
-  for (const [v, label, ico] of [['history', 'Riwayat', 'history'], ['favorites', 'Favorit', 'star']]) {
+  for (const [v, label, ico] of [['history', t('History'), 'history'], ['favorites', t('Favorites'), 'star']]) {
     const b = h('button', { class: v === which ? 'active' : '', html: icon(ico) + label });
     b.onclick = () => {
       which = v;
@@ -328,14 +347,14 @@ export function openHistory(tab) {
     render();
   };
   const m = modal({
-    title: 'Riwayat & favorit',
-    sub: 'Klik untuk menyisipkan ke editor · klik kanan favorit untuk menghapus',
+    title: t('History & favorites'),
+    sub: t('Click to insert into the editor · right-click a favorite to delete it'),
     icon: 'history',
     size: 'wide',
     body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, h('div', { class: 'row' }, seg, h('div', { class: 'search grow', html: icon('search') }, search)), list),
     actions: [
       {
-        label: 'Hapus riwayat',
+        label: t('Clear history'),
         kind: 'ghost danger',
         icon: 'trash-2',
         onClick: () => {
@@ -345,7 +364,7 @@ export function openHistory(tab) {
         },
       },
       'spacer',
-      { label: 'Tutup' },
+      { label: t('Close') },
     ],
   });
   render();

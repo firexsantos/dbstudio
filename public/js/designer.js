@@ -2,6 +2,7 @@
 import { h, icon, esc, api, qs, state, app, toast, debounce, createEditor, sqlPreview, select, checkbox, confirmDialog, TYPE_LABEL } from './core.js';
 import { addTab, activateTab, renderTabs, findTab, closeTab } from './tabs.js';
 import { invalidateSchema } from './table.js';
+import { t, plural, LANG } from './i18n.js';
 
 const TYPES = {
   mysql: ['int', 'bigint', 'smallint', 'tinyint(1)', 'decimal(10,2)', 'float', 'double', 'varchar(255)', 'char(36)', 'text', 'mediumtext', 'longtext', 'json', 'date', 'datetime', 'timestamp', 'time', 'year', 'blob', 'longblob', "enum('a','b')"],
@@ -21,8 +22,8 @@ function blankModel(type) {
     engine: type === 'mysql' ? 'InnoDB' : null,
     columns: [
       { name: 'id', type: id, nullable: false, default: null, autoIncrement: true, comment: '' },
-      { name: 'nama', type: str, nullable: false, default: null, autoIncrement: false, comment: '' },
-      { name: 'dibuat_pada', type: ts, nullable: false, default: 'CURRENT_TIMESTAMP', autoIncrement: false, comment: '' },
+      { name: LANG === 'id' ? 'nama' : 'name', type: str, nullable: false, default: null, autoIncrement: false, comment: '' },
+      { name: LANG === 'id' ? 'dibuat_pada' : 'created_at', type: ts, nullable: false, default: 'CURRENT_TIMESTAMP', autoIncrement: false, comment: '' },
     ],
     primaryKey: ['id'],
     indexes: [],
@@ -48,7 +49,7 @@ function encodeDefault(input, original) {
 function multiPick(anchor, options, selected, onChange) {
   document.querySelector('.multi-pop')?.remove();
   const pop = h('div', { id: 'ctx-menu', class: 'multi-pop' });
-  if (!options.length) pop.append(h('div', { class: 'm-label', text: 'Tidak ada kolom' }));
+  if (!options.length) pop.append(h('div', { class: 'm-label', text: t('No columns') }));
   for (const o of options) {
     const cb = checkbox(o.label, selected.includes(o.value), (on) => {
       const next = on ? [...selected, o.value] : selected.filter((x) => x !== o.value);
@@ -73,7 +74,7 @@ function multiPick(anchor, options, selected, onChange) {
 
 export async function openDesigner(table = null) {
   const a = state.active;
-  if (!a) return toast('Hubungkan ke database dulu', 'err');
+  if (!a) return toast(t('Connect to a database first'), 'err');
   const existing = findTab((t) => t.kind === 'designer' && t.connId === a.conn.id && t.ns === a.ns && t.table === table && table);
   if (existing) return activateTab(existing.id);
   const type = a.conn.type;
@@ -94,15 +95,15 @@ export async function openDesigner(table = null) {
   const tbl = { name: model.name || '', comment: model.comment || '', engine: model.engine };
 
   const panel = h('div');
-  const nameIn = h('input', { class: 'input', style: { font: '600 15px var(--display)', height: '36px' }, value: tbl.name, placeholder: 'nama_tabel' });
-  const commentIn = h('input', { class: 'input', value: tbl.comment, placeholder: 'Komentar tabel (opsional)' });
+  const nameIn = h('input', { class: 'input', style: { font: '600 15px var(--display)', height: '36px' }, value: tbl.name, placeholder: t('table_name') });
+  const commentIn = h('input', { class: 'input', value: tbl.comment, placeholder: t('Table comment (optional)') });
   const engineSel = type === 'mysql' ? select(['InnoDB', 'MyISAM', 'Aria', 'MEMORY'], tbl.engine || 'InnoDB', { style: { width: '120px' } }) : null;
-  const bPreview = h('button', { class: 'btn sm', html: icon('panel-right') + '<span>Pratinjau SQL</span>' });
-  const bSave = h('button', { class: 'btn sm primary', html: icon('save') + `<span>${table ? 'Simpan perubahan' : 'Buat tabel'}</span>` });
+  const bPreview = h('button', { class: 'btn sm', html: icon('panel-right') + `<span>${t('SQL preview')}</span>` });
+  const bSave = h('button', { class: 'btn sm primary', html: icon('save') + `<span>${table ? t('Save changes') : t('Create table')}</span>` });
   const head = h(
     'div',
     { class: 'toolbar', style: { gap: '10px' } },
-    h('span', { class: 'chip info', html: icon(table ? 'pencil-ruler' : 'sparkles') + (table ? 'Ubah tabel' : 'Tabel baru') }),
+    h('span', { class: 'chip info', html: icon(table ? 'pencil-ruler' : 'sparkles') + (table ? t('Edit table') : t('New table')) }),
     h('div', { style: { width: '240px' } }, nameIn),
     h('div', { class: 'grow', style: { minWidth: '160px' } }, commentIn),
     engineSel,
@@ -118,41 +119,41 @@ export async function openDesigner(table = null) {
   const colCard = h(
     'div',
     { class: 'card' },
-    h('div', { class: 'card-title', html: icon('columns-3') + 'Kolom' }),
+    h('div', { class: 'card-title', html: icon('columns-3') + t('Columns') }),
     h(
       'table',
       { class: 'd-table' },
-      h('thead', {}, h('tr', {}, ...['', 'Nama', 'Tipe', 'Null', 'PK', 'Auto', 'Default', type === 'sqlite' ? null : 'Komentar', ''].filter((x) => x !== null).map((t) => h('th', { text: t })))),
+      h('thead', {}, h('tr', {}, ...['', t('Name'), t('Type'), 'Null', 'PK', 'Auto', 'Default', type === 'sqlite' ? null : t('Comment'), ''].filter((x) => x !== null).map((x) => h('th', { text: x })))),
       colBody,
     ),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn sm', html: icon('plus') + '<span>Kolom</span>', onclick: () => addColumn() }), h('span', { class: 'faint', style: { fontSize: '11.5px' }, text: 'Seret ⠿ untuk mengurutkan · Default teks otomatis diberi tanda kutip; tulis ekspresi seperti CURRENT_TIMESTAMP apa adanya.' })),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn sm', html: icon('plus') + `<span>${t('Column')}</span>`, onclick: () => addColumn() }), h('span', { class: 'faint', style: { fontSize: '11.5px' }, text: t('Drag ⠿ to reorder · Text defaults are quoted automatically; write expressions such as CURRENT_TIMESTAMP as is.') })),
     datalist,
   );
   const idxCard = h(
     'div',
     { class: 'card' },
-    h('div', { class: 'card-title', html: icon('list-ordered') + 'Index' }),
+    h('div', { class: 'card-title', html: icon('list-ordered') + t('Indexes') }),
     idxBody,
-    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn sm', html: icon('plus') + '<span>Index</span>', onclick: () => addIndex() })),
-    complexIdx.length ? h('div', { class: 'faint', style: { marginTop: '8px', fontSize: '11.5px' }, text: `${complexIdx.length} index berbasis ekspresi tidak ditampilkan & tidak diubah.` }) : null,
+    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn sm', html: icon('plus') + `<span>${t('Index')}</span>`, onclick: () => addIndex() })),
+    complexIdx.length ? h('div', { class: 'faint', style: { marginTop: '8px', fontSize: '11.5px' }, text: plural(complexIdx.length, '{n} expression-based index is not shown and will not be changed.', '{n} expression-based indexes are not shown and will not be changed.') }) : null,
   );
   const fkCard = h(
     'div',
     { class: 'card' },
-    h('div', { class: 'card-title', html: icon('git-fork') + 'Relasi (foreign key)' }),
+    h('div', { class: 'card-title', html: icon('git-fork') + t('Relations (foreign keys)') }),
     fkBody,
-    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn sm', html: icon('plus') + '<span>Relasi</span>', onclick: () => addFk() })),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn sm', html: icon('plus') + `<span>${t('Relation')}</span>`, onclick: () => addFk() })),
   );
   const previewBox = h('div', { class: 'code-box' });
   const warnBox = h('div', { style: { padding: '0 10px', display: 'flex', flexDirection: 'column', gap: '6px' } });
-  const preview = h('div', { class: 'd-preview' }, h('div', { class: 'toolbar', html: `${icon('file-code-2')}<b>SQL</b><span class="spacer"></span><span class="chip" id="pv-state">siap</span>` }), warnBox, previewBox);
+  const preview = h('div', { class: 'd-preview' }, h('div', { class: 'toolbar', html: `${icon('file-code-2')}<b>SQL</b><span class="spacer"></span><span class="chip" id="pv-state">${t('ready')}</span>` }), warnBox, previewBox);
   const designer = h('div', { class: 'designer' }, h('div', { class: 'd-main' }, colCard, idxCard, fkCard), preview);
   panel.append(head, designer);
 
   const tab = {
     kind: 'designer',
     icon: 'pencil-ruler',
-    title: table ? `Desain: ${table}` : 'Tabel baru',
+    title: table ? t('Design: {name}', { name: table }) : t('New table'),
     connId: a.conn.id,
     connType: type,
     ns: a.ns,
@@ -207,18 +208,18 @@ export async function openDesigner(table = null) {
   }
   const pvState = () => preview.querySelector('#pv-state');
   const refresh = debounce(async () => {
-    pvState().textContent = 'memperbarui…';
+    pvState().textContent = t('updating…');
     try {
       const r = await generate();
-      pv.setValue(r.statements.join('\n\n') || '-- Tidak ada perubahan');
+      pv.setValue(r.statements.join('\n\n') || '-- ' + t('No changes'));
       warnBox.innerHTML = '';
       for (const w of r.warnings || []) warnBox.append(h('div', { class: 'notice warn', style: { fontSize: '11.5px' }, html: icon('triangle-alert') + `<div>${esc(w)}</div>` }));
       pvState().className = 'chip ok';
-      pvState().textContent = `${r.statements.length} statement`;
+      pvState().textContent = plural(r.statements.length, '{n} statement', '{n} statements');
     } catch (e) {
       pv.setValue('-- ' + e.message);
       pvState().className = 'chip danger';
-      pvState().textContent = 'belum valid';
+      pvState().textContent = t('not valid yet');
     }
   }, 350);
   const changed = () => {
@@ -234,8 +235,8 @@ export async function openDesigner(table = null) {
   function renderColumns() {
     colBody.innerHTML = '';
     cols.forEach((c, i) => {
-      const name = h('input', { class: 'input mono', value: c.name, placeholder: 'kolom' });
-      const ty = h('input', { class: 'input mono', value: c.type, list: datalist.id, placeholder: 'tipe' });
+      const name = h('input', { class: 'input mono', value: c.name, placeholder: t('column') });
+      const ty = h('input', { class: 'input mono', value: c.type, list: datalist.id, placeholder: t('type') });
       const nul = checkbox('', c.nullable && !c.pk, (v) => ((c.nullable = v), changed()));
       const pk = checkbox('', c.pk, (v) => {
         c.pk = v;
@@ -258,8 +259,8 @@ export async function openDesigner(table = null) {
       ty.oninput = () => ((c.type = ty.value), changed());
       def.oninput = () => ((c.defaultInput = def.value), changed());
       com.oninput = () => ((c.comment = com.value), changed());
-      const del = h('button', { class: 'btn ghost xs icon danger', title: 'Hapus kolom', html: icon('x') });
-      const grip = h('td', { class: 'grip', title: 'Seret untuk mengurutkan', html: icon('grip-vertical') });
+      const del = h('button', { class: 'btn ghost xs icon danger', title: t('Delete column'), html: icon('x') });
+      const grip = h('td', { class: 'grip', title: t('Drag to reorder'), html: icon('grip-vertical') });
       const tr = h(
         'tr',
         { class: 'd-row', style: { animationDelay: `${Math.min(i, 20) * 22}ms` } },
@@ -273,7 +274,7 @@ export async function openDesigner(table = null) {
         type === 'sqlite' ? null : h('td', {}, com),
         h('td', {}, del),
       );
-      if (c.generated) tr.title = `Kolom generated: ${c.generated.expr}`;
+      if (c.generated) tr.title = t('Generated column: {expr}', { expr: c.generated.expr });
       del.onclick = () => {
         tr.classList.add('removing');
         setTimeout(() => {
@@ -312,7 +313,7 @@ export async function openDesigner(table = null) {
     });
   }
   function addColumn() {
-    cols.push({ _id: ++uid, name: `kolom_${cols.length + 1}`, type: TYPES[type][type === 'sqlite' ? 3 : 7], nullable: true, defaultInput: '', autoIncrement: false, pk: false, comment: '' });
+    cols.push({ _id: ++uid, name: `${LANG === 'id' ? 'kolom' : 'column'}_${cols.length + 1}`, type: TYPES[type][type === 'sqlite' ? 3 : 7], nullable: true, defaultInput: '', autoIncrement: false, pk: false, comment: '' });
     renderColumns();
     changed();
     setTimeout(() => colBody.lastElementChild?.querySelector('input')?.select(), 30);
@@ -322,7 +323,7 @@ export async function openDesigner(table = null) {
   const colOptions = () => cols.filter((c) => c.name.trim()).map((c) => ({ value: c._id, label: c.name }));
   function pickerButton(getIds, setIds, options = colOptions) {
     const b = h('button', { class: 'input mono', type: 'button' });
-    const label = () => (b.textContent = getIds().map(nameOf).filter(Boolean).join(', ') || 'pilih kolom…');
+    const label = () => (b.textContent = getIds().map(nameOf).filter(Boolean).join(', ') || t('choose columns…'));
     label();
     b.onclick = () =>
       multiPick(b, options(), getIds(), (ids) => {
@@ -334,9 +335,9 @@ export async function openDesigner(table = null) {
   }
   function renderIndexes() {
     idxBody.innerHTML = '';
-    if (!indexes.length) idxBody.append(h('div', { class: 'faint', text: 'Belum ada index (selain primary key).' }));
+    if (!indexes.length) idxBody.append(h('div', { class: 'faint', text: t('No indexes yet (besides the primary key).') }));
     for (const ix of indexes) {
-      const name = h('input', { class: 'input mono', value: ix.name || '', placeholder: 'nama_index (otomatis)', style: { width: '220px' } });
+      const name = h('input', { class: 'input mono', value: ix.name || '', placeholder: t('index_name (automatic)'), style: { width: '220px' } });
       name.oninput = () => ((ix.name = name.value), changed());
       const uq = checkbox('Unique', ix.unique, (v) => ((ix.unique = v), changed()));
       const del = h('button', { class: 'btn ghost xs icon danger', html: icon('x'), onclick: () => (indexes.splice(indexes.indexOf(ix), 1), renderIndexes(), changed()) });
@@ -353,14 +354,14 @@ export async function openDesigner(table = null) {
   const tableNames = () => state.tables.filter((t) => t.kind === 'table').map((t) => t.name);
   function renderFks() {
     fkBody.innerHTML = '';
-    if (!fks.length) fkBody.append(h('div', { class: 'faint', text: 'Belum ada relasi. Tambahkan untuk menghubungkan kolom ke tabel lain.' }));
+    if (!fks.length) fkBody.append(h('div', { class: 'faint', text: t('No relations yet. Add one to link columns to another table.') }));
     for (const f of fks) {
-      const name = h('input', { class: 'input mono', value: f.name || '', placeholder: 'nama (otomatis)', style: { width: '170px' } });
+      const name = h('input', { class: 'input mono', value: f.name || '', placeholder: t('name (automatic)'), style: { width: '170px' } });
       name.oninput = () => ((f.name = name.value), changed());
-      const refSel = select([{ value: '', label: '— tabel rujukan —' }, ...tableNames().map((t) => ({ value: t, label: t }))], f.refTable || '', { style: { width: '170px' } });
+      const refSel = select([{ value: '', label: t('— referenced table —') }, ...tableNames().map((t) => ({ value: t, label: t }))], f.refTable || '', { style: { width: '170px' } });
       const refCols = () => (state.columns[f.refTable] || []).map((c) => ({ value: c, label: c }));
       const refBtn = h('button', { class: 'input mono', type: 'button' });
-      const refLabel = () => (refBtn.textContent = f.refColumns?.join(', ') || 'kolom rujukan…');
+      const refLabel = () => (refBtn.textContent = f.refColumns?.join(', ') || t('referenced columns…'));
       refLabel();
       refBtn.onclick = () => multiPick(refBtn, refCols(), f.refColumns || [], (v) => ((f.refColumns = v), refLabel(), changed()));
       refSel.onchange = () => {
@@ -406,22 +407,22 @@ export async function openDesigner(table = null) {
     try {
       r = await generate();
     } catch (e) {
-      return toast(e.message, 'err', { title: 'Desain belum valid' });
+      return toast(e.message, 'err', { title: t('Design is not valid yet') });
     }
-    if (!r.statements.length) return toast('Tidak ada perubahan untuk disimpan', 'info');
+    if (!r.statements.length) return toast(t('No changes to save'), 'info');
     const ok = await sqlPreview({
-      title: table ? `Ubah tabel ${table}` : `Buat tabel ${nameIn.value.trim()}`,
+      title: table ? t('Alter table {name}', { name: table }) : t('Create table {name}', { name: nameIn.value.trim() }),
       sub: `${TYPE_LABEL[type]} · ${a.ns}`,
       statements: r.statements,
       warnings: r.warnings,
       connId: a.conn.id,
       ns: a.ns,
       type,
-      confirmLabel: table ? 'Terapkan perubahan' : 'Buat tabel',
+      confirmLabel: table ? t('Apply changes') : t('Create table'),
     });
     if (!ok) return;
     const finalName = nameIn.value.trim();
-    toast(table ? 'Struktur tabel diperbarui' : `Tabel ${finalName} dibuat`, 'ok', { title: 'Berhasil' });
+    toast(table ? t('Table structure updated') : t('Table {name} created', { name: finalName }), 'ok', { title: t('Success') });
     invalidateSchema();
     tab.dirty = false;
     await app.loadTree();

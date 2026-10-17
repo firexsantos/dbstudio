@@ -1,5 +1,6 @@
 // Tab manager: query, table, designer, ERD and tool tabs all live here.
 import { $, h, icon, state, emit, currentTab, showMenu, confirmDialog, esc } from './core.js';
+import { t } from './i18n.js';
 
 export function addTab(tab, { activate = true } = {}) {
   tab.id = ++state.seq;
@@ -18,33 +19,38 @@ export function addTab(tab, { activate = true } = {}) {
 export function activateTab(id) {
   const changed = state.activeTab !== id;
   state.activeTab = id;
-  for (const t of state.tabs) t.panel.hidden = t.id !== id;
-  const t = currentTab();
-  if (t && changed) {
-    t.panel.classList.remove('entering');
-    void t.panel.offsetWidth;
-    t.panel.classList.add('entering');
+  for (const x of state.tabs) x.panel.hidden = x.id !== id;
+  const tab = currentTab();
+  if (tab && changed) {
+    tab.panel.classList.remove('entering');
+    void tab.panel.offsetWidth;
+    tab.panel.classList.add('entering');
   }
   renderTabs();
-  t?.onActivate?.();
+  try {
+    tab?.onActivate?.();
+  } catch (err) {
+    // A tab whose widgets are still being built must not break tab switching.
+    console.warn('onActivate', err);
+  }
   emit('tab');
 }
 
 export async function closeTab(id, force = false) {
-  const i = state.tabs.findIndex((t) => t.id === id);
+  const i = state.tabs.findIndex((x) => x.id === id);
   if (i < 0) return true;
-  const t = state.tabs[i];
-  if (!force && t.isDirty?.()) {
+  const tab = state.tabs[i];
+  if (!force && tab.isDirty?.()) {
     const ok = await confirmDialog({
-      title: 'Tutup tanpa menyimpan?',
-      message: `Tab <b>${esc(t.title)}</b> punya perubahan yang belum disimpan.`,
+      title: t('Close without saving?'),
+      message: t('Tab <b>{title}</b> has unsaved changes.', { title: esc(tab.title) }),
       danger: true,
-      confirmLabel: 'Buang & tutup',
+      confirmLabel: t('Discard & close'),
     });
     if (!ok) return false;
   }
-  t.onClose?.();
-  t.panel.remove();
+  tab.onClose?.();
+  tab.panel.remove();
   state.tabs.splice(i, 1);
   if (state.activeTab === id) {
     const n = state.tabs[i] || state.tabs[i - 1];
@@ -60,32 +66,32 @@ export async function closeTab(id, force = false) {
 export function renderTabs() {
   const box = $('#tabs');
   box.innerHTML = '';
-  for (const t of state.tabs) {
+  for (const tab of state.tabs) {
     const el = h(
       'div',
       {
-        class: 'tab' + (t.id === state.activeTab ? ' active' : '') + (t.isDirty?.() ? ' dirty' : '') + (t.fresh ? ' entering' : ''),
-        title: t.tooltip || t.title,
+        class: 'tab' + (tab.id === state.activeTab ? ' active' : '') + (tab.isDirty?.() ? ' dirty' : '') + (tab.fresh ? ' entering' : ''),
+        title: tab.tooltip || tab.title,
       },
-      h('span', { class: 't-ico', html: icon(t.icon || 'file') }),
-      h('span', { class: 't-title', text: t.title }),
-      h('button', { class: 't-close', title: 'Tutup (tengah-klik)', html: icon('x') }),
+      h('span', { class: 't-ico', html: icon(tab.icon || 'file') }),
+      h('span', { class: 't-title', text: tab.title }),
+      h('button', { class: 't-close', title: t('Close (middle-click)'), html: icon('x') }),
     );
-    t.fresh = false;
-    el.onclick = () => activateTab(t.id);
+    tab.fresh = false;
+    el.onclick = () => activateTab(tab.id);
     el.onauxclick = (e) => {
-      if (e.button === 1) closeTab(t.id);
+      if (e.button === 1) closeTab(tab.id);
     };
     el.querySelector('.t-close').onclick = (e) => {
       e.stopPropagation();
-      closeTab(t.id);
+      closeTab(tab.id);
     };
     el.oncontextmenu = (e) =>
       showMenu(e, [
-        t.rename ? { label: 'Ganti nama…', icon: 'pencil', action: () => t.rename() } : null,
-        { label: 'Tutup', icon: 'x', action: () => closeTab(t.id) },
-        { label: 'Tutup tab lain', icon: 'copy-x', action: async () => { for (const x of state.tabs.filter((x) => x.id !== t.id)) await closeTab(x.id); } },
-        { label: 'Tutup semua', icon: 'circle-x', action: async () => { for (const x of [...state.tabs]) await closeTab(x.id); } },
+        tab.rename ? { label: t('Rename…'), icon: 'pencil', action: () => tab.rename() } : null,
+        { label: t('Close'), icon: 'x', action: () => closeTab(tab.id) },
+        { label: t('Close other tabs'), icon: 'copy-x', action: async () => { for (const x of state.tabs.filter((x) => x.id !== tab.id)) await closeTab(x.id); } },
+        { label: t('Close all'), icon: 'circle-x', action: async () => { for (const x of [...state.tabs]) await closeTab(x.id); } },
       ]);
     box.append(el);
   }

@@ -3,16 +3,17 @@ import { h, icon, esc, api, state, app, toast, sqlPreview, toggle, checkbox, con
 import { addTab, activateTab, findTab } from './tabs.js';
 import { namespacesOf, defaultNsFor, connSelect } from './conn.js';
 import { countUp } from './fx.js';
+import { t, plural } from './i18n.js';
 
 const STATUS = {
-  same: ['ok', 'check', 'Sama'],
-  different: ['warn', 'git-compare', 'Berbeda'],
-  missing: ['info', 'plus', 'Belum ada di target'],
-  extra: ['danger', 'minus', 'Hanya di target'],
+  same: ['ok', 'check', t('Same')],
+  different: ['warn', 'git-compare', t('Different')],
+  missing: ['info', 'plus', t('Missing in target')],
+  extra: ['danger', 'minus', t('Only in target')],
 };
 
 export async function openCompare() {
-  if (!state.conns.length) return toast('Belum ada koneksi', 'err');
+  if (!state.conns.length) return toast(t('No connections yet'), 'err');
   const prev = findTab((t) => t.kind === 'compare');
   if (prev) return activateTab(prev.id);
   const a = state.active;
@@ -38,8 +39,8 @@ export async function openCompare() {
   const dstConn = connSelect(st.dstId, async (v) => ((st.dstId = v), (st.dstNs = await fill(dstNs, v))));
   srcNs.onchange = () => (st.srcNs = srcNs.value);
   dstNs.onchange = () => (st.dstNs = dstNs.value);
-  const go = h('button', { class: 'btn primary', html: icon('git-compare') + '<span>Bandingkan</span>' });
-  const applyBtn = h('button', { class: 'btn primary', html: icon('wand-sparkles') + '<span>Sinkronkan target</span>', hidden: true });
+  const go = h('button', { class: 'btn primary', html: icon('git-compare') + `<span>${t('Compare')}</span>` });
+  const applyBtn = h('button', { class: 'btn primary', html: icon('wand-sparkles') + `<span>${t('Sync target')}</span>`, hidden: true });
   const summary = h('div', { class: 'row wrap' });
   const list = h('div', { style: { marginTop: '14px' } });
 
@@ -47,27 +48,27 @@ export async function openCompare() {
     h(
       'div',
       { class: 'scroll-pad' },
-      h('div', { style: { font: '700 22px var(--display)' }, text: 'Bandingkan & sinkronkan skema' }),
-      h('div', { class: 'faint', style: { marginBottom: '16px' }, text: 'Bandingkan struktur dua database (engine sama), lalu buat SQL untuk menyamakan target dengan sumber.' }),
+      h('div', { style: { font: '700 22px var(--display)' }, text: t('Compare & sync schemas') }),
+      h('div', { class: 'faint', style: { marginBottom: '16px' }, text: t('Compare the structure of two databases (same engine), then generate SQL that brings the target in line with the source.') }),
       h(
         'div',
         { class: 'two-col' },
-        h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('database') + 'Sumber (acuan)' }), h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', { text: 'Koneksi' }), srcConn), h('div', { class: 'field' }, h('label', { text: 'Database / schema' }), srcNs))),
-        h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('target') + 'Target (diubah)' }), h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', { text: 'Koneksi' }), dstConn), h('div', { class: 'field' }, h('label', { text: 'Database / schema' }), dstNs))),
+        h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('database') + t('Source (reference)') }), h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', { text: t('Connection') }), srcConn), h('div', { class: 'field' }, h('label', { text: t('Database / schema') }), srcNs))),
+        h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('target') + t('Target (modified)') }), h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', { text: t('Connection') }), dstConn), h('div', { class: 'field' }, h('label', { text: t('Database / schema') }), dstNs))),
       ),
-      h('div', { class: 'row', style: { marginTop: '14px' } }, toggle('Sertakan DROP TABLE untuk tabel yang hanya ada di target', false, (v) => (st.drops = v)), h('span', { class: 'spacer' }), go),
+      h('div', { class: 'row', style: { marginTop: '14px' } }, toggle(t('Include DROP TABLE for tables that exist only in the target'), false, (v) => (st.drops = v)), h('span', { class: 'spacer' }), go),
       h('div', { class: 'card', style: { marginTop: '14px' } }, h('div', { class: 'row' }, summary, h('span', { class: 'spacer' }), applyBtn), list),
     ),
   );
-  summary.append(h('span', { class: 'faint', text: 'Pilih sumber & target lalu klik Bandingkan.' }));
-  const tab = { kind: 'compare', icon: 'git-compare', title: 'Schema compare', panel };
+  summary.append(h('span', { class: 'faint', text: t('Choose a source and target, then click Compare.') }));
+  const tab = { kind: 'compare', icon: 'git-compare', title: t('Schema compare'), panel };
   addTab(tab);
 
   go.onclick = async () => {
     const s = connById(st.srcId);
     const d = connById(st.dstId);
-    if (s.type !== d.type) return toast(`${TYPE_LABEL[s.type]} ≠ ${TYPE_LABEL[d.type]} — untuk lintas engine gunakan "Salin tabel".`, 'err', { title: 'Engine berbeda' });
-    if (st.srcId === st.dstId && st.srcNs === st.dstNs) return toast('Sumber dan target sama', 'err');
+    if (s.type !== d.type) return toast(t('{source} ≠ {target} — use "Copy tables" to move between engines.', { source: TYPE_LABEL[s.type], target: TYPE_LABEL[d.type] }), 'err', { title: t('Different engines') });
+    if (st.srcId === st.dstId && st.srcNs === st.dstNs) return toast(t('Source and target are the same'), 'err');
     go.classList.add('loading');
     list.innerHTML = '';
     for (let i = 0; i < 5; i++) list.append(h('div', { class: 'skeleton', style: { height: '40px', marginBottom: '8px' } }));
@@ -96,31 +97,31 @@ export async function openCompare() {
     const sorted = [...st.items].sort((x, y) => (x.status === 'same') - (y.status === 'same'));
     sorted.forEach((it, i) => {
       const [cls, ico, label] = STATUS[it.status];
-      const pre = h('pre', { hidden: true, text: it.statements.join('\n\n') || '-- tidak ada perubahan' });
+      const pre = h('pre', { hidden: true, text: it.statements.join('\n\n') || t('-- no changes') });
       const cb = it.statements.length ? checkbox('', st.pick.has(it.table), (v) => (v ? st.pick.add(it.table) : st.pick.delete(it.table), updateApply())) : h('span', { style: { width: '16px' } });
-      const head = h('div', { class: 'cmp-head' }, cb, h('span', { class: `chip ${cls}`, html: icon(ico) + label }), h('b', { class: 'mono', text: it.table }), h('span', { class: 'faint', text: it.statements.length ? `${it.statements.length} statement` : '' }), h('span', { class: 'spacer' }), it.statements.length ? h('span', { html: icon('chevron-down') }) : null);
+      const head = h('div', { class: 'cmp-head' }, cb, h('span', { class: `chip ${cls}`, html: icon(ico) + label }), h('b', { class: 'mono', text: it.table }), h('span', { class: 'faint', text: it.statements.length ? plural(it.statements.length, '{n} statement', '{n} statements') : '' }), h('span', { class: 'spacer' }), it.statements.length ? h('span', { html: icon('chevron-down') }) : null);
       head.onclick = (e) => {
         if (e.target.closest('.check')) return;
         pre.hidden = !pre.hidden;
       };
       list.append(h('div', { class: 'cmp-item', style: { '--i': i } }, head, pre, ...(it.warnings || []).map((w) => h('div', { class: 'notice warn', style: { margin: '0 12px 10px' }, html: icon('triangle-alert') + esc(w) }))));
     });
-    if (!sorted.length) list.append(h('div', { class: 'empty', text: 'Tidak ada tabel.' }));
+    if (!sorted.length) list.append(h('div', { class: 'empty', text: t('No tables.') }));
     updateApply();
   }
   function updateApply() {
     const stmts = st.items.filter((i) => st.pick.has(i.table)).flatMap((i) => i.statements);
     applyBtn.hidden = !stmts.length;
-    applyBtn.querySelector('span').textContent = `Sinkronkan target (${stmts.length})`;
+    applyBtn.querySelector('span').textContent = t('Sync target ({n})', { n: stmts.length });
   }
   applyBtn.onclick = async () => {
     // Missing tables first (they may be FK targets), FK additions last.
     const order = (i) => (i.table === '(foreign keys)' ? 3 : i.status === 'missing' ? 0 : i.status === 'different' ? 1 : 2);
     const stmts = st.items.filter((i) => st.pick.has(i.table)).sort((x, y) => order(x) - order(y)).flatMap((i) => i.statements);
     const d = connById(st.dstId);
-    const ok = await sqlPreview({ title: `Sinkronkan ${d.name}${d.type !== 'sqlite' ? ' / ' + st.dstNs : ''}`, sub: `${stmts.length} statement · ${nsLabel(d.type)} target akan diubah`, statements: stmts, connId: st.dstId, ns: st.dstNs, type: d.type, confirmLabel: 'Sinkronkan' });
+    const ok = await sqlPreview({ title: t('Sync {target}', { target: `${d.name}${d.type !== 'sqlite' ? ' / ' + st.dstNs : ''}` }), sub: t('{statements} · the target {kind} will be modified', { statements: plural(stmts.length, '{n} statement', '{n} statements'), kind: nsLabel(d.type) }), statements: stmts, connId: st.dstId, ns: st.dstNs, type: d.type, confirmLabel: t('Sync') });
     if (ok) {
-      toast('Target sekarang sesuai sumber', 'ok', { title: 'Sinkron' });
+      toast(t('Target now matches the source'), 'ok', { title: t('Synced') });
       if (state.active?.conn.id === st.dstId) app.loadTree();
       go.click();
     }

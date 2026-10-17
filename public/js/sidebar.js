@@ -5,6 +5,7 @@ import {
 } from './core.js';
 import { LOGO, stagger, switchTheme } from './fx.js';
 import { connSub } from './conn.js';
+import { t } from './i18n.js';
 
 let panel = local.get('dbs-panel', 'connections');
 const collapsed = new Set(local.get('dbs-tree-collapsed', ['events']));
@@ -18,13 +19,8 @@ export function initSidebar() {
   $('#btn-palette').onclick = () => app.openPalette();
   $('#btn-new-conn').onclick = () => app.openConnDialog();
   $('#btn-refresh-jobs').onclick = refreshJobs;
-  on('conns', renderConnections);
-  on('connected', () => {
-    renderConnections();
-    renderExplorer();
-  });
+  on('connected', renderExplorer);
   on('connecting', markConnecting);
-  on('connect-failed', renderConnections);
   on('jobs', renderJobs);
   on('tab', highlightOpen);
   showPanel(panel);
@@ -69,26 +65,6 @@ function moveRailIndicator(btn) {
 }
 
 // ---------------------------------------------------------------- connections panel
-function renderConnections() {
-  const box = $('#conn-list');
-  box.innerHTML = '';
-  if (!state.conns.length) {
-    box.append(
-      h(
-        'div',
-        { class: 'empty' },
-        h('div', { html: icon('plug') }),
-        h('div', { text: 'Belum ada koneksi tersimpan.' }),
-        h('button', { class: 'btn primary sm', html: icon('plus') + '<span>Koneksi baru</span>', onclick: () => app.openConnDialog() }),
-        h('button', { class: 'btn sm', html: icon('sparkles') + '<span>Coba database demo</span>', onclick: () => app.openDemo() }),
-      ),
-    );
-    return;
-  }
-  for (const c of state.conns) box.append(connCard(c));
-  stagger(box);
-}
-
 export function connCard(c, { compact = false } = {}) {
   const active = state.active?.conn.id === c.id;
   const card = h(
@@ -99,7 +75,7 @@ export function connCard(c, { compact = false } = {}) {
     h(
       'div',
       { class: 'cc-text' },
-      h('div', { class: 'cc-name', text: c.name || '(tanpa nama)' }),
+      h('div', { class: 'cc-name', text: c.name || t('(untitled)') }),
       h('div', { class: 'cc-sub', html: (c.ssh?.enabled ? icon('shield-check') : '') + esc(connSub(c)) }),
     ),
     active ? h('span', { class: 'pulse on' }) : null,
@@ -108,19 +84,24 @@ export function connCard(c, { compact = false } = {}) {
       : h(
           'div',
           { class: 'cc-actions' },
+          h('button', { class: 'btn ghost xs icon cc-star' + (c.favorite ? ' on' : ''), title: c.favorite ? t('Remove from favorites') : t('Add to favorites'), html: icon('star'), onclick: (e) => (e.stopPropagation(), app.toggleFavorite(c)) }),
           h('button', { class: 'btn ghost xs icon', title: 'Edit', html: icon('settings-2'), onclick: (e) => (e.stopPropagation(), app.openConnDialog(c)) }),
         ),
+    !compact && c.favorite ? h('span', { class: 'cc-fav', html: icon('star') }) : null,
   );
   card.onclick = () => app.connect(c.id);
   card.oncontextmenu = (e) =>
     showMenu(e, [
       { label: c.name, header: true },
-      { label: 'Hubungkan', icon: 'zap', action: () => app.connect(c.id) },
+      { label: t('Connect'), icon: 'zap', action: () => app.connect(c.id) },
       { label: 'Edit…', icon: 'settings-2', action: () => app.openConnDialog(c) },
-      { label: 'Duplikat', icon: 'copy', action: () => app.duplicateConn(c) },
-      active ? { label: 'Putuskan', icon: 'unplug', action: () => app.disconnect() } : null,
+      { label: t('Duplicate'), icon: 'copy', action: () => app.duplicateConn(c) },
+      { label: c.favorite ? t('Remove from favorites') : t('Add to favorites'), icon: 'star', action: () => app.toggleFavorite(c) },
+      { label: t('Move to group…'), icon: 'folder-input', action: () => app.groupPicker(e, [c]) },
+      { label: t('Export this connection…'), icon: 'upload', action: () => app.openExportDialog({ ids: [c.id] }) },
+      active ? { label: t('Disconnect'), icon: 'unplug', action: () => app.disconnect() } : null,
       '-',
-      { label: 'Hapus koneksi', icon: 'trash-2', danger: true, action: () => app.deleteConn(c) },
+      { label: t('Delete connection'), icon: 'trash-2', danger: true, action: () => app.deleteConn(c) },
     ]);
   return card;
 }
@@ -131,7 +112,7 @@ function markConnecting(id) {
   card.classList.remove('warp');
   void card.offsetWidth;
   card.classList.add('warp');
-  card.querySelector('.cc-sub').innerHTML = `${icon('loader-circle', 'spin')} menghubungkan…`;
+  card.querySelector('.cc-sub').innerHTML = `${icon('loader-circle', 'spin')} ${t('connecting…')}`;
 }
 
 // ---------------------------------------------------------------- explorer
@@ -152,7 +133,7 @@ export async function loadTree() {
     state.columns = cols;
     state.objects = objects;
   } catch (e) {
-    toast(e.message, 'err', { title: 'Gagal memuat objek' });
+    toast(e.message, 'err', { title: t('Could not load objects') });
   } finally {
     state.treeLoading = false;
   }
@@ -185,30 +166,31 @@ function renderExplorer() {
         'div',
         { class: 'empty', style: { flex: 1 } },
         h('div', { html: icon('database-zap') }),
-        h('div', { text: 'Belum terhubung ke database.' }),
-        h('button', { class: 'btn primary sm', html: icon('plug') + '<span>Pilih koneksi</span>', onclick: () => showPanel('connections') }),
+        h('div', { text: t('Not connected to a database.') }),
+        h('button', { class: 'btn primary sm', html: icon('plug') + `<span>${t('Choose a connection')}</span>`, onclick: () => showPanel('connections') }),
       ),
     );
     return;
   }
-  const t = a.conn.type;
+  const type = a.conn.type;
+  const pg = type === 'postgres';
   el.append(
     h('div', { class: 'side-head' }, h('div', { class: 'side-title', text: 'Explorer' }),
-      h('button', { class: 'btn ghost xs icon', title: 'Muat ulang', html: icon('refresh-cw'), onclick: () => (refreshNamespaces(), loadTree()) }),
-      h('button', { class: 'btn ghost xs icon', title: 'Info server', html: icon('server'), onclick: () => app.openTool('server') }),
-      h('button', { class: 'btn ghost xs icon', title: 'Putuskan', html: icon('unplug'), onclick: () => app.disconnect() }),
+      h('button', { class: 'btn ghost xs icon', title: t('Refresh'), html: icon('refresh-cw'), onclick: () => (refreshNamespaces(), loadTree()) }),
+      h('button', { class: 'btn ghost xs icon', title: t('Server info'), html: icon('server'), onclick: () => app.openTool('server') }),
+      h('button', { class: 'btn ghost xs icon', title: t('Disconnect'), html: icon('unplug'), onclick: () => app.disconnect() }),
     ),
     h(
       'div',
       { class: 'active-conn' },
-      h('span', { html: engineBadge(t) }),
-      h('div', { class: 'grow', style: { minWidth: 0 } }, h('div', { class: 'ac-name', text: a.conn.name }), h('div', { class: 'ac-sub', text: `${TYPE_LABEL[t]} ${String(a.version || '').split(/[ -]/)[0]}${a.conn.ssh?.enabled ? ' · SSH' : ''}` })),
+      h('span', { html: engineBadge(type) }),
+      h('div', { class: 'grow', style: { minWidth: 0 } }, h('div', { class: 'ac-name', text: a.conn.name }), h('div', { class: 'ac-sub', text: `${TYPE_LABEL[type]} ${String(a.version || '').split(/[ -]/)[0]}${a.conn.ssh?.enabled ? ' · SSH' : ''}` })),
       h('span', { class: 'pulse on' }),
     ),
   );
 
-  if (t !== 'sqlite') {
-    const sel = h('select', { class: 'select sm grow', title: nsLabel(t) });
+  if (type !== 'sqlite') {
+    const sel = h('select', { class: 'select sm grow', title: nsLabel(type) });
     for (const n of a.namespaces) {
       const o = h('option', { value: n }, n);
       if (n === a.ns) o.selected = true;
@@ -220,12 +202,12 @@ function renderExplorer() {
         'div',
         { class: 'ns-row' },
         sel,
-        h('button', { class: 'btn sm icon', title: `${nsLabel(t)} baru`, html: icon('folder-plus'), onclick: () => app.createNamespace() }),
-        h('button', { class: 'btn sm icon', title: `Aksi ${nsLabel(t).toLowerCase()}`, html: icon('ellipsis'), onclick: (e) => nsMenu(e) }),
+        h('button', { class: 'btn sm icon', title: pg ? t('New schema') : t('New database'), html: icon('folder-plus'), onclick: () => app.createNamespace() }),
+        h('button', { class: 'btn sm icon', title: pg ? t('Schema actions') : t('Database actions'), html: icon('ellipsis'), onclick: (e) => nsMenu(e) }),
       ),
     );
   }
-  const filter = h('input', { class: 'input sm', placeholder: 'Cari tabel, view, routine…', value: state.treeFilter || '' });
+  const filter = h('input', { class: 'input sm', placeholder: t('Search tables, views, routines…'), value: state.treeFilter || '' });
   filter.oninput = () => {
     state.treeFilter = filter.value;
     renderTree(treeBox);
@@ -238,19 +220,26 @@ function renderExplorer() {
 
 function nsMenu(e) {
   const a = state.active;
-  const label = nsLabel(a.conn.type).toLowerCase();
+  const pg = a.conn.type === 'postgres';
   showMenu(e, [
     { label: a.ns, header: true },
-    { label: `${nsLabel(a.conn.type)} baru…`, icon: 'folder-plus', action: () => app.createNamespace() },
-    { label: 'Tabel baru…', icon: 'table-properties', action: () => app.openDesigner(null) },
-    { label: 'Lihat ERD', icon: 'workflow', action: () => app.openTool('erd') },
+    { label: pg ? t('New schema…') : t('New database…'), icon: 'folder-plus', action: () => app.createNamespace() },
+    { label: t('New table…'), icon: 'table-properties', action: () => app.openDesigner(null) },
+    { label: t('View ERD'), icon: 'workflow', action: () => app.openTool('erd') },
     '-',
-    { label: `Salin ${label} ke…`, icon: 'copy-plus', action: () => app.openCopy({ all: true }) },
-    { label: `Export ${label} (SQL)`, icon: 'download', action: () => app.openTransfer({ tab: 'export-sql' }) },
-    { label: 'Import file SQL', icon: 'upload', action: () => app.openTransfer({ tab: 'import-sql' }) },
-    { label: 'Bandingkan skema', icon: 'git-compare', action: () => app.openTool('compare') },
+    { label: 'Query Builder', icon: 'blocks', action: () => app.openTool('qb') },
+    { label: t('Search in database…'), icon: 'search-code', action: () => app.openTool('finder') },
+    { label: t('Test data generator…'), icon: 'wand-sparkles', action: () => app.openTool('datagen') },
+    { label: 'Data dictionary…', icon: 'book-open-text', action: () => app.openTool('dictionary') },
+    { label: 'Backup & restore', icon: 'archive-restore', action: () => app.openTool('backup') },
     '-',
-    { label: `Hapus ${label} "${a.ns}"…`, icon: 'trash-2', danger: true, action: () => app.dropNamespace(a.ns) },
+    { label: pg ? t('Copy schema to…') : t('Copy database to…'), icon: 'copy-plus', action: () => app.openCopy({ all: true }) },
+    { label: t('Data sync…'), icon: 'arrow-left-right', action: () => app.openTool('datasync') },
+    { label: pg ? t('Export schema (SQL)') : t('Export database (SQL)'), icon: 'download', action: () => app.openTransfer({ tab: 'export-sql' }) },
+    { label: t('Import SQL file'), icon: 'upload', action: () => app.openTransfer({ tab: 'import-sql' }) },
+    { label: t('Compare schemas'), icon: 'git-compare', action: () => app.openTool('compare') },
+    '-',
+    { label: pg ? t('Drop schema "{name}"…', { name: a.ns }) : t('Drop database "{name}"…', { name: a.ns }), icon: 'trash-2', danger: true, action: () => app.dropNamespace(a.ns) },
   ]);
 }
 
@@ -295,58 +284,59 @@ function renderTree(box) {
   const ev = events.filter((x) => match(x.name));
 
   box.append(
-    section('tables', 'Tabel', 'table-2', tables, (t) => tableItem(t), [
-      { icon: 'plus', title: 'Tabel baru', action: () => app.openDesigner(null) },
+    section('tables', t('Tables'), 'table-2', tables, (tb) => tableItem(tb), [
+      { icon: 'plus', title: t('New table'), action: () => app.openDesigner(null) },
       { icon: 'workflow', title: 'ERD', action: () => app.openTool('erd') },
     ]),
-    section('views', 'View', 'eye', views, (t) => tableItem(t)),
+    section('views', t('Views'), 'eye', views, (tb) => tableItem(tb)),
   );
   if (a.conn.type !== 'sqlite') {
-    box.append(section('routines', 'Routine', 'function-square', r, (x) => objItem(x, x.kind, x.kind === 'procedure' ? 'cog' : 'sigma', 'routine')));
+    box.append(section('routines', t('Routines'), 'function-square', r, (x) => objItem(x, x.kind, x.kind === 'procedure' ? 'cog' : 'sigma', 'routine')));
   }
-  box.append(section('triggers', 'Trigger', 'zap', tr, (x) => objItem(x, 'trigger', 'zap', 'trigger', x.tbl)));
-  if (a.conn.type === 'mysql') box.append(section('events', 'Event', 'calendar-clock', ev, (x) => objItem(x, 'event', 'calendar-clock', 'trigger', x.info)));
+  box.append(section('triggers', t('Triggers'), 'zap', tr, (x) => objItem(x, 'trigger', 'zap', 'trigger', x.tbl)));
+  if (a.conn.type === 'mysql') box.append(section('events', t('Events'), 'calendar-clock', ev, (x) => objItem(x, 'event', 'calendar-clock', 'trigger', x.info)));
   if (!state.tables.length && !f) {
-    box.append(h('div', { class: 'empty' }, h('div', { text: `${nsLabel(a.conn.type)} ini masih kosong.` }), h('button', { class: 'btn sm primary', html: icon('plus') + '<span>Buat tabel</span>', onclick: () => app.openDesigner(null) })));
+    box.append(h('div', { class: 'empty' }, h('div', { text: a.conn.type === 'postgres' ? t('This schema is empty.') : t('This database is empty.') }), h('button', { class: 'btn sm primary', html: icon('plus') + `<span>${t('Create table')}</span>`, onclick: () => app.openDesigner(null) })));
   }
   highlightOpen();
 }
 
-function tableItem(t) {
+function tableItem(tb) {
   const it = h(
     'div',
-    { class: 'tree-item ' + t.kind, 'data-table': t.name, title: t.name },
-    h('span', { html: icon(t.kind === 'view' ? 'eye' : 'table-2') }),
-    h('span', { class: 'ti-name', text: t.name }),
-    t.approxRows != null ? h('span', { class: 'ti-meta', text: '~' + fmtNum(t.approxRows) }) : null,
+    { class: 'tree-item ' + tb.kind, 'data-table': tb.name, title: tb.name },
+    h('span', { html: icon(tb.kind === 'view' ? 'eye' : 'table-2') }),
+    h('span', { class: 'ti-name', text: tb.name }),
+    tb.approxRows != null ? h('span', { class: 'ti-meta', text: '~' + fmtNum(tb.approxRows) }) : null,
   );
-  it.onclick = () => app.openTableTab(t.name);
-  it.oncontextmenu = (e) => tableMenu(e, t);
+  it.onclick = () => app.openTableTab(tb.name);
+  it.oncontextmenu = (e) => tableMenu(e, tb);
   return it;
 }
 
-function tableMenu(e, t) {
+function tableMenu(e, tb) {
   const type = state.active.conn.type;
-  const isView = t.kind === 'view';
+  const isView = tb.kind === 'view';
   showMenu(e, [
-    { label: t.name, header: true },
-    { label: 'Buka data', icon: 'table', action: () => app.openTableTab(t.name) },
-    isView ? { label: 'Definisi view', icon: 'file-code-2', action: () => app.showObjectDef('view', t) } : { label: 'Desain tabel…', icon: 'pencil-ruler', action: () => app.openDesigner(t.name) },
-    { label: 'Struktur & relasi', icon: 'list-tree', action: () => app.openTableTab(t.name, 'structure') },
-    isView ? null : { label: 'Lihat di ERD', icon: 'workflow', action: () => app.openTool('erd', { focus: t.name }) },
+    { label: tb.name, header: true },
+    { label: t('Open data'), icon: 'table', action: () => app.openTableTab(tb.name) },
+    isView ? { label: t('View definition'), icon: 'file-code-2', action: () => app.showObjectDef('view', tb) } : { label: t('Design table…'), icon: 'pencil-ruler', action: () => app.openDesigner(tb.name) },
+    { label: t('Structure & relations'), icon: 'list-tree', action: () => app.openTableTab(tb.name, 'structure') },
+    isView ? null : { label: t('Show in ERD'), icon: 'workflow', action: () => app.openTool('erd', { focus: tb.name }) },
     '-',
-    { label: 'Query: SELECT *', icon: 'square-terminal', action: () => app.newQueryTab(`SELECT * FROM ${quoteIdent(t.name, type)} LIMIT 100;`, true) },
-    { label: 'Query: hitung baris', icon: 'hash', action: () => app.newQueryTab(`SELECT COUNT(*) FROM ${quoteIdent(t.name, type)};`, true) },
+    { label: 'Query: SELECT *', icon: 'square-terminal', action: () => app.newQueryTab(`SELECT * FROM ${quoteIdent(tb.name, type)} LIMIT 100;`, true) },
+    { label: t('Query: count rows'), icon: 'hash', action: () => app.newQueryTab(`SELECT COUNT(*) FROM ${quoteIdent(tb.name, type)};`, true) },
     '-',
-    isView ? null : { label: 'Salin ke database / server lain…', icon: 'copy-plus', action: () => app.openCopy({ tables: [t.name] }) },
-    isView ? null : { label: 'Duplikat tabel…', icon: 'copy', action: () => app.duplicateTable(t.name) },
-    { label: 'Export (CSV / JSON / SQL)…', icon: 'download', action: () => app.openTransfer({ tab: 'export-data', table: t.name }) },
-    isView ? null : { label: 'Import CSV ke tabel ini…', icon: 'upload', action: () => app.openTransfer({ tab: 'import-csv', table: t.name }) },
+    isView ? null : { label: t('Copy to another database / server…'), icon: 'copy-plus', action: () => app.openCopy({ tables: [tb.name] }) },
+    isView ? null : { label: t('Duplicate table…'), icon: 'copy', action: () => app.duplicateTable(tb.name) },
+    isView ? null : { label: t('Fill with test data…'), icon: 'wand-sparkles', action: () => app.openDataGen({ table: tb.name }) },
+    { label: 'Export (CSV / JSON / SQL)…', icon: 'download', action: () => app.openTransfer({ tab: 'export-data', table: tb.name }) },
+    isView ? null : { label: t('Import CSV into this table…'), icon: 'upload', action: () => app.openTransfer({ tab: 'import-csv', table: tb.name }) },
     '-',
-    { label: 'Ganti nama…', icon: 'text-cursor-input', action: () => app.tableOp('rename', t.name, t.kind) },
-    isView ? null : { label: 'Kosongkan (TRUNCATE)…', icon: 'eraser', danger: true, action: () => app.tableOp('truncate', t.name, t.kind) },
-    { label: isView ? 'Hapus view…' : 'Hapus tabel…', icon: 'trash-2', danger: true, action: () => app.tableOp('drop', t.name, t.kind) },
-    { label: 'Salin nama', icon: 'clipboard', action: () => copyText(t.name) },
+    { label: t('Rename…'), icon: 'text-cursor-input', action: () => app.tableOp('rename', tb.name, tb.kind) },
+    isView ? null : { label: t('Empty (TRUNCATE)…'), icon: 'eraser', danger: true, action: () => app.tableOp('truncate', tb.name, tb.kind) },
+    { label: isView ? t('Drop view…') : t('Drop table…'), icon: 'trash-2', danger: true, action: () => app.tableOp('drop', tb.name, tb.kind) },
+    { label: t('Copy name'), icon: 'clipboard', action: () => copyText(tb.name) },
   ]);
 }
 
@@ -356,17 +346,17 @@ function objItem(x, kind, ico, cls, meta) {
   it.oncontextmenu = (e) =>
     showMenu(e, [
       { label: x.name, header: true },
-      { label: 'Lihat / edit definisi', icon: 'file-code-2', action: () => app.showObjectDef(kind, x) },
-      { label: 'Salin nama', icon: 'clipboard', action: () => copyText(x.name) },
+      { label: t('View / edit definition'), icon: 'file-code-2', action: () => app.showObjectDef(kind, x) },
+      { label: t('Copy name'), icon: 'clipboard', action: () => copyText(x.name) },
       '-',
-      { label: 'Hapus…', icon: 'trash-2', danger: true, action: () => app.dropObject(kind, x) },
+      { label: t('Drop…'), icon: 'trash-2', danger: true, action: () => app.dropObject(kind, x) },
     ]);
   return it;
 }
 
 function highlightOpen() {
-  const t = currentTab();
-  $$('#explorer .tree-item[data-table]').forEach((el) => el.classList.toggle('open', Boolean(t && t.kind === 'table' && t.table === el.dataset.table && t.ns === state.active?.ns)));
+  const tab = currentTab();
+  $$('#explorer .tree-item[data-table]').forEach((el) => el.classList.toggle('open', Boolean(tab && tab.kind === 'table' && tab.table === el.dataset.table && tab.ns === state.active?.ns)));
 }
 
 // ---------------------------------------------------------------- jobs
@@ -390,13 +380,13 @@ function renderJobs() {
   if (!box || box.closest('[hidden]')) return;
   box.innerHTML = '';
   if (!jobs.length) {
-    box.append(h('div', { class: 'empty' }, h('div', { html: icon('list-checks') }), h('div', { text: 'Belum ada pekerjaan. Copy, export, dan import muncul di sini.' })));
+    box.append(h('div', { class: 'empty' }, h('div', { html: icon('list-checks') }), h('div', { text: t('No jobs yet. Copies, exports and imports show up here.') })));
     return;
   }
   for (const j of jobs) {
     const pct = Math.round(j.progress * 100);
     const chip =
-      j.status === 'running' ? `<span class="chip info">${pct}%</span>` : j.status === 'done' ? `<span class="chip ok">${icon('check')} selesai</span>` : j.status === 'cancelled' ? '<span class="chip warn">dibatalkan</span>' : `<span class="chip danger">${icon('x')} gagal</span>`;
+      j.status === 'running' ? `<span class="chip info">${pct}%</span>` : j.status === 'done' ? `<span class="chip ok">${icon('check')} ${t('done')}</span>` : j.status === 'cancelled' ? `<span class="chip warn">${t('cancelled')}</span>` : `<span class="chip danger">${icon('x')} ${t('failed')}</span>`;
     const card = h(
       'div',
       { class: 'job-card' },
@@ -405,8 +395,8 @@ function renderJobs() {
       h('div', { class: 'jc-phase', html: `<span>${esc(j.error || j.phase || '')}</span><span>${timeAgo(j.startedAt)}</span>` }),
     );
     const acts = h('div', { class: 'row', style: { marginTop: '8px' } });
-    if (j.download) acts.append(h('button', { class: 'btn sm primary', html: icon('download') + '<span>Unduh</span>', onclick: () => download(j.download) }));
-    if (j.status === 'running') acts.append(h('button', { class: 'btn sm', html: icon('square') + '<span>Batalkan</span>', onclick: () => api('POST', `/api/jobs/${j.id}/cancel`) }));
+    if (j.download) acts.append(h('button', { class: 'btn sm primary', html: icon('download') + `<span>${t('Download')}</span>`, onclick: () => download(j.download) }));
+    if (j.status === 'running') acts.append(h('button', { class: 'btn sm', html: icon('square') + `<span>${t('Cancel')}</span>`, onclick: () => api('POST', `/api/jobs/${j.id}/cancel`) }));
     if (acts.children.length) card.append(acts);
     box.append(card);
   }

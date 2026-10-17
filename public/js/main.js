@@ -15,6 +15,16 @@ import './servertool.js';
 import './ops.js';
 import './palette.js';
 import './about.js';
+import { initConnPanel } from './connmgr.js';
+import './tools.js';
+import './syncui.js';
+import './genui.js';
+import './findui.js';
+import './backupui.js';
+import './qbuilder.js';
+import { maybeShowWhatsNew } from './whatsnew.js';
+import './settings.js';
+import { t, plural, translateDom } from './i18n.js';
 
 // Three tilted elliptical orbits, each with a glowing satellite travelling along it.
 function orbitsSvg() {
@@ -54,23 +64,23 @@ function renderWelcome() {
       h(
         'div',
         { class: 'hero' },
-        h('div', { class: 'eyebrow', html: '<span class="chip">BARU</span> SSH tunnel · ERD · copy lintas server · schema sync' }),
-        h('h1', { html: 'Semua database,<br><span class="grad-text">satu studio.</span>' }),
-        h('p', { text: 'MySQL/MariaDB, PostgreSQL dan SQLite — kelola koneksi, desain tabel & relasi, salin data antar server, dan jalankan query dalam satu antarmuka.' }),
+        h('div', { class: 'eyebrow', html: t('<span class="chip">NEW</span> SSH tunnel · ERD · cross-server copy · schema sync') }),
+        h('h1', { html: t('Every database,<br><span class="grad-text">one studio.</span>') }),
+        h('p', { text: t('MySQL/MariaDB, PostgreSQL and SQLite — manage connections, design tables & relations, copy data between servers and run queries in one interface.') }),
         h(
           'div',
           { class: 'qa-grid' },
-          qa('plug-zap', 'Koneksi baru', 'Langsung atau via SSH', () => app.openConnDialog()),
-          qa('sparkles', 'Coba demo', 'Database toko (SQLite)', () => app.openDemo()),
-          qa('square-terminal', 'Query baru', 'Editor SQL + autocomplete', () => app.newQueryTab()),
-          qa('workflow', 'ERD', 'Diagram relasi interaktif', () => app.openTool('erd')),
-          qa('copy-plus', 'Salin tabel', 'Ke DB / server / engine lain', () => app.openTool('copy')),
-          qa('command', 'Palet perintah', 'Ctrl + K', () => app.openPalette()),
+          qa('plug-zap', t('New connection'), t('Direct or via SSH'), () => app.openConnDialog()),
+          qa('sparkles', t('Try the demo'), t('Store database (SQLite)'), () => app.openDemo()),
+          qa('square-terminal', t('New query'), t('SQL editor + autocomplete'), () => app.newQueryTab()),
+          qa('workflow', 'ERD', t('Interactive relation diagram'), () => app.openTool('erd')),
+          qa('copy-plus', t('Copy table'), t('To another DB / server / engine'), () => app.openTool('copy')),
+          qa('command', t('Command palette'), 'Ctrl + K', () => app.openPalette()),
         ),
         recent.length
-          ? h('div', { class: 'recent' }, h('div', { class: 'section-label', style: { marginBottom: '8px' }, text: 'Koneksi tersimpan' }), h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' } }, ...recent.map((c) => connCard(c, { compact: true }))))
+          ? h('div', { class: 'recent' }, h('div', { class: 'section-label', style: { marginBottom: '8px' }, text: t('Saved connections') }), h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' } }, ...recent.map((c) => connCard(c, { compact: true }))))
           : null,
-        h('div', { class: 'welcome-credit' }, 'Dikembangkan oleh ', h('a', { text: 'Firman Santosa', onclick: () => app.openAbout() }), ' · ', h('a', { text: 'Tentang aplikasi', onclick: () => app.openAbout() })),
+        h('div', { class: 'welcome-credit' }, t('Developed by') + ' ', h('a', { text: 'Firman Santosa', onclick: () => app.openAbout() }), ' · ', h('a', { text: t('About the app'), onclick: () => app.openAbout() })),
       ),
       h(
         'div',
@@ -88,16 +98,16 @@ function renderWelcome() {
 function renderStatus() {
   const a = state.active;
   const jobs = [...state.jobs.values()].filter((j) => j.status === 'running');
-  const t = currentTab();
+  const tab = currentTab();
   $('#statusbar').innerHTML = `
-    <span class="sb-item"><span class="pulse ${a ? 'on' : ''}"></span>${a ? esc(a.conn.name) : 'Belum terhubung'}</span>
+    <span class="sb-item"><span class="pulse ${a ? 'on' : ''}"></span>${a ? esc(a.conn.name) : t('Not connected')}</span>
     ${a ? `<span class="sb-item">${icon('database')} ${TYPE_LABEL[a.conn.type]} ${esc(String(a.version || '').split(/[ -]/)[0])}</span>` : ''}
     ${a && a.conn.type !== 'sqlite' ? `<span class="sb-item">${icon('folder')} ${esc(a.ns)}</span>` : ''}
     ${a?.conn.ssh?.enabled ? `<span class="sb-item">${icon('shield-check')} SSH ${esc(a.conn.ssh.host)}</span>` : ''}
-    ${t?.table ? `<span class="sb-item">${icon('table-2')} ${esc(t.table)}</span>` : ''}
+    ${tab?.table ? `<span class="sb-item">${icon('table-2')} ${esc(tab.table)}</span>` : ''}
     <span class="spacer"></span>
-    ${jobs.length ? `<span class="sb-item" style="color:var(--a2)">${icon('loader-circle', 'spin')} ${jobs.length} pekerjaan berjalan · ${Math.round((jobs[0].progress || 0) * 100)}%</span>` : ''}
-    <span class="sb-item"><kbd>Ctrl</kbd><kbd>K</kbd> palet perintah</span>`;
+    ${jobs.length ? `<span class="sb-item" style="color:var(--a2)">${icon('loader-circle', 'spin')} ${plural(jobs.length, '{n} job running', '{n} jobs running')} · ${Math.round((jobs[0].progress || 0) * 100)}%</span>` : ''}
+    <span class="sb-item"><kbd>Ctrl</kbd><kbd>K</kbd> ${t('command palette')}</span>`;
 }
 
 // sidebar resizer
@@ -118,7 +128,7 @@ function initResizer() {
       r.classList.remove('dragging');
       r.removeEventListener('pointermove', move);
       r.removeEventListener('pointerup', up);
-      for (const t of state.tabs) t.cm?.refresh();
+      for (const tb of state.tabs) tb.cm?.refresh();
     };
     r.addEventListener('pointermove', move);
     r.addEventListener('pointerup', up);
@@ -134,13 +144,16 @@ addEventListener('keydown', (e) => {
   } else if (mod && e.key.toLowerCase() === 's') {
     e.preventDefault();
     currentTab()?.onSave?.();
+  } else if (mod && e.key === ',') {
+    e.preventDefault();
+    app.openSettings();
   } else if (e.altKey && e.key.toLowerCase() === 'n') {
     e.preventDefault();
     app.newQueryTab();
   }
 });
 addEventListener('beforeunload', (e) => {
-  if (state.tabs.some((t) => t.isDirty?.())) {
+  if (!window.__dbsReloading && state.tabs.some((x) => x.isDirty?.())) {
     e.preventDefault();
     e.returnValue = '';
   }
@@ -151,7 +164,10 @@ for (const ev of ['connected', 'ns', 'tab', 'jobs']) on(ev, renderStatus);
 setInterval(renderStatus, 1500);
 
 (async function boot() {
+  translateDom();
   initSidebar();
+  initConnPanel();
+  app.renderTools();
   initResizer();
   renderWelcome();
   renderStatus();
@@ -165,4 +181,5 @@ setInterval(renderStatus, 1500);
   const last = local.get('dbs-last-conn', null);
   if (last && state.conns.some((c) => c.id === last)) app.connect(last, { silent: true });
   setTimeout(() => $('#app').classList.remove('intro'), 1400);
+  setTimeout(maybeShowWhatsNew, 1600);
 })();

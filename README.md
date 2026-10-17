@@ -18,7 +18,8 @@
 
 <p align="center"><img src="docs/screenshots/welcome.webp" alt="DBStudio start screen" width="900"></p>
 
-> **Note:** the user interface is currently in Indonesian.
+> The interface is available in **English** (default) and **Bahasa Indonesia** — switch in **Settings** (`Ctrl+,`).
+> See [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Download
 
@@ -57,7 +58,18 @@ choose **More info → Run anyway**. Verify downloads with `SHA256SUMS.txt`.
 | **Export / Import** | SQL dumps (optionally in another engine's dialect) · CSV/JSON/SQL export · `.sql` import (handles `DELIMITER`, `$$`) · **CSV import** with column mapping |
 | **Schema compare** | Compare two databases/schemas (same engine) and sync the target |
 | **Server** | Process list + kill · variables · status · **users & privileges** (create, change password, GRANT/REVOKE, drop) |
-| **More** | Command palette `Ctrl+K` · dark/light theme · every schema change goes through an editable **SQL preview** |
+| **Connection manager** | Groups/folders · favorites · search · drag & drop · sort by name or last used |
+| **Import / export connections** | DBStudio JSON (optionally passphrase-encrypted) · import from **Navicat** (`.ncx`) and **DBeaver** · duplicate detection |
+| **Data sync** | Compare table **contents** row by row across databases, servers and engines · apply in transactions or save the SQL script |
+| **Test data generator** | Realistic data that respects types, `UNIQUE`, `ENUM`/`CHECK` lists and foreign keys · append or replace · live preview |
+| **Query Builder** | Visual: add tables, joins from foreign keys, columns, aggregates, filters, `GROUP BY`/`HAVING`, sort — no SQL typing needed |
+| **Charts** | Bar, line, area, donut and scatter charts from any query result · PNG/SVG export |
+| **Find in database** | Search a value in every table and column at once |
+| **Record tools** | Form view (one row per page) · JSON / image / hex value viewer · `Ctrl+click` a foreign key to jump to its row |
+| **Export formats** | **Excel (.xlsx)**, CSV, JSON, Markdown, HTML, SQL `INSERT` — from query results and tables |
+| **Data dictionary** | Shareable HTML / Markdown documentation of a whole schema |
+| **Backup & restore** | One-click compressed backups with history, restore and download |
+| **More** | Command palette `Ctrl+K` · **English / Indonesian** interface · dark/light theme · every schema change goes through an editable **SQL preview** |
 
 ## Running from source
 
@@ -67,7 +79,7 @@ npm start          # → open http://localhost:5174
 ```
 
 Requires Node.js ≥ 22.5 (SQLite uses Node's built-in `node:sqlite` — no native modules).
-No database server at hand? Click **“Coba demo”** (try the demo) on the start screen (regenerate it with `npm run demo`).
+No database server at hand? Click **“Try the demo”** on the start screen (regenerate it with `npm run demo`).
 
 ## Building the desktop app
 
@@ -77,8 +89,8 @@ npm run dist       # Linux packages → dist/*.deb and dist/*.AppImage
 npm run dist:win   # Windows installer → dist/DBStudio-Setup-<version>.exe (needs Wine on Linux)
 ```
 
-The desktop app runs the DBStudio server inside the app on a random port bound to `127.0.0.1`, so it never clashes with
-`npm start`. Saved connections are shared (`~/.dbstudio/connections.json`).
+The desktop app runs the DBStudio server inside the app on port 51740 (or a free port if that is taken), bound to `127.0.0.1`, so it never clashes with
+`npm start`. Saved connections and settings are shared (`~/.dbstudio/connections.json`, `~/.dbstudio/settings.json`).
 
 > Running `npm run app` from a VS Code terminal: VS Code sets `ELECTRON_RUN_AS_NODE=1`, so start it with
 > `env -u ELECTRON_RUN_AS_NODE npm run app`.
@@ -105,6 +117,9 @@ ssh -L 8080:localhost:5174 user@server     # then open http://localhost:8080
 | `Ctrl+Shift+F` | Format SQL |
 | `Ctrl+S` | Save changes (table data / designer) |
 | `Alt+N` | New query tab |
+| `Ctrl+,` | Settings (language, theme) |
+| `Space` | Open the value viewer for the selected cell |
+| `Ctrl+click` | Follow a foreign key to the referenced row |
 | Double-click / `Enter` / `F2` · `Tab` | Edit cell · move to next cell |
 | `Delete` | Mark selected rows for deletion |
 
@@ -123,9 +138,17 @@ DBSTUDIO_TEST_MYSQL='mysql://user:pass@127.0.0.1:3306' \
 DBSTUDIO_TEST_PG='postgres://user:pass@127.0.0.1:5432/postgres' npm run selftest
 ```
 
-~360 checks: schema introspection, CREATE/ALTER, a 3×3 cross-engine copy matrix, dump → import across dialects, schema
-compare, statement splitting. MySQL: creates & drops temporary `dbst_*` databases; PostgreSQL: temporary schemas.
+~560 checks: schema introspection, CREATE/ALTER, a 3×3 cross-engine copy matrix, dump → import across dialects, schema
+compare, statement splitting, connection import/export (Navicat, DBeaver, encrypted), Excel output, data sync across engines,
+the test data generator, find/data dictionary/backup & restore, and translations/settings. MySQL: creates & drops temporary `dbst_*` databases; PostgreSQL: temporary schemas.
 Existing data is never touched.
+
+## Translations
+
+English strings in the source are the translation keys: UI code calls `t('Delete {n} rows?', { n })`, and
+[`public/js/locales/id.js`](public/js/locales/id.js) maps each English key to Indonesian. The same dictionary is used by
+the server (job progress, errors, data dictionaries) and the desktop menu. To add a language, add a `locales/<code>.js`
+file with the same keys and register it in `public/js/i18n.js` and `lib/settings.js`.
 
 ## Project layout
 
@@ -137,7 +160,17 @@ lib/schema.js        schema introspection, CREATE/ALTER, cross-engine type mappi
 lib/copy.js          copy tables across databases/servers/engines
 lib/transfer.js      SQL dumps, CSV/JSON export, SQL import
 lib/jobs.js          background jobs with progress
+lib/connio.js        connection import/export (DBStudio, Navicat, DBeaver)
+lib/datasync.js      row-level data compare & sync
+lib/datagen.js       test data generator
+lib/finder.js        find a value across a whole database
+lib/dictionary.js    data dictionary (HTML / Markdown)
+lib/backup.js        backup & restore history
+lib/xlsx.js          dependency-free Excel writer
+lib/settings.js      preferences (~/.dbstudio/settings.json)
+lib/i18n.js          server-side translations
 public/js/*.js       UI (ES modules, no build step)
+public/js/locales/   translations (English is the source text; id.js = Indonesian)
 public/css/app.css   "Nebula Glass" design system
 electron/main.mjs    desktop app (Electron)
 build/               app icons

@@ -1,8 +1,8 @@
 {
   "name": "dbstudio",
   "productName": "DBStudio",
-  "version": "0.2.0",
-  "description": "Manajer database MySQL/MariaDB, PostgreSQL & SQLite — SSH tunnel, ERD, salin tabel antar server, schema sync.",
+  "version": "0.3.0",
+  "description": "Database manager for MySQL/MariaDB, PostgreSQL & SQLite — SSH tunnels, ERD, cross-server table copy, schema sync.",
   "author": {
     "name": "Firman Santosa",
     "email": "admin@sifirman.com",

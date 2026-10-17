@@ -3,6 +3,7 @@ import { h, icon, esc, api, qs, state, app, local, toast, showMenu, modal, selec
 import { addTab, activateTab, findTab } from './tabs.js';
 import { schemaOf, invalidateSchema } from './table.js';
 import { motionOK } from './fx.js';
+import { t } from './i18n.js';
 
 const W = 240;
 const HEAD = 38;
@@ -11,7 +12,7 @@ const RULES = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT'];
 
 export async function openErd({ focus } = {}) {
   const a = state.active;
-  if (!a) return toast('Hubungkan ke database dulu', 'err');
+  if (!a) return toast(t('Connect to a database first'), 'err');
   const existing = findTab((t) => t.kind === 'erd' && t.connId === a.conn.id && t.ns === a.ns);
   if (existing) {
     activateTab(existing.id);
@@ -29,10 +30,10 @@ export async function openErd({ focus } = {}) {
   svg.classList.add('erd-links');
   world.append(svg);
   viewport.append(world);
-  const search = h('input', { class: 'input sm', placeholder: 'Cari tabel…', style: { width: '170px' } });
+  const search = h('input', { class: 'input sm', placeholder: t('Search tables…'), style: { width: '170px' } });
   const zoomLabel = h('span', { class: 'erd-zoom' });
   const B = (ico, tip, fn, label) => h('button', { class: 'btn sm' + (label ? '' : ' icon'), title: tip, html: icon(ico) + (label ? `<span>${label}</span>` : ''), onclick: fn });
-  const keysBtn = B('key-round', 'Tampilkan kolom kunci saja', () => {
+  const keysBtn = B('key-round', t('Show key columns only'), () => {
     st.keysOnly = !st.keysOnly;
     keysBtn.classList.toggle('primary', st.keysOnly);
     render(false);
@@ -43,19 +44,19 @@ export async function openErd({ focus } = {}) {
     'div',
     { class: 'erd-hud tl glass' },
     h('div', { class: 'search', html: icon('search') }, search),
-    B('layout-dashboard', 'Tata letak otomatis', () => autoLayout(true), 'Rapikan'),
+    B('layout-dashboard', t('Auto layout'), () => autoLayout(true), t('Arrange')),
     keysBtn,
-    B('scan', 'Muat semua di layar', () => fit(true)),
-    B('refresh-cw', 'Muat ulang skema', () => load(true)),
+    B('scan', t('Fit to screen'), () => fit(true)),
+    B('refresh-cw', t('Reload schema'), () => load(true)),
     B('download', 'Export', (e) =>
       showMenu(e, [
         { label: 'Export SVG', icon: 'file-image', action: () => exportImage('svg') },
         { label: 'Export PNG', icon: 'image', action: () => exportImage('png') },
       ]),
     ),
-    B('plus', 'Tabel baru', () => app.openDesigner(null)),
+    B('plus', t('New table'), () => app.openDesigner(null)),
   );
-  const hudBR = h('div', { class: 'erd-hud br glass' }, B('minus', 'Perkecil', () => zoomBy(1 / 1.2)), zoomLabel, B('plus', 'Perbesar', () => zoomBy(1.2)));
+  const hudBR = h('div', { class: 'erd-hud br glass' }, B('minus', t('Zoom out'), () => zoomBy(1 / 1.2)), zoomLabel, B('plus', t('Zoom in'), () => zoomBy(1.2)));
   const minimap = h('div', { class: 'erd-minimap glass' });
   viewport.append(hudTL, hudBR, minimap);
   panel.append(viewport);
@@ -94,7 +95,7 @@ export async function openErd({ focus } = {}) {
     applyView();
     if (focus) setTimeout(() => focusTable(focus), 700);
     if (!st.models.length) {
-      viewport.append(h('div', { class: 'empty', style: { position: 'absolute', inset: 0 }, html: `${icon('workflow')}<div>Belum ada tabel di sini.</div>` }));
+      viewport.append(h('div', { class: 'empty', style: { position: 'absolute', inset: 0 }, html: `${icon('workflow')}<div>${t('No tables here yet.')}</div>` }));
     }
   }
 
@@ -286,9 +287,9 @@ export async function openErd({ focus } = {}) {
     head.addEventListener('contextmenu', (e) =>
       showMenu(e, [
         { label: m.name, header: true },
-        { label: 'Buka data', icon: 'table', action: () => app.openTableTab(m.name) },
-        { label: 'Desain tabel…', icon: 'pencil-ruler', action: () => app.openDesigner(m.name) },
-        { label: 'Relasi & index', icon: 'git-fork', action: () => app.openTableTab(m.name, 'relations') },
+        { label: t('Open data'), icon: 'table', action: () => app.openTableTab(m.name) },
+        { label: t('Design table…'), icon: 'pencil-ruler', action: () => app.openDesigner(m.name) },
+        { label: t('Relations & indexes'), icon: 'git-fork', action: () => app.openTableTab(m.name, 'relations') },
       ]),
     );
     head.addEventListener('pointerdown', (e) => {
@@ -372,9 +373,9 @@ export async function openErd({ focus } = {}) {
     const next = { ...model, columns: model.columns.map((c) => ({ ...c, origName: c.name })), indexes: model.indexes.filter((i) => !i.complex) };
     mutate(next);
     const r = await api('POST', `/api/c/${a.conn.id}/sql/alter-table`, { ns: a.ns, table, model: next });
-    const ok = await sqlPreview({ title, sub: `${TYPE_LABEL[a.conn.type]} · ${table}`, statements: r.statements, warnings: r.warnings, connId: a.conn.id, ns: a.ns, type: a.conn.type, confirmLabel: 'Terapkan' });
+    const ok = await sqlPreview({ title, sub: `${TYPE_LABEL[a.conn.type]} · ${table}`, statements: r.statements, warnings: r.warnings, connId: a.conn.id, ns: a.ns, type: a.conn.type, confirmLabel: t('Apply') });
     if (ok) {
-      toast(title, 'ok', { title: 'Relasi diperbarui' });
+      toast(title, 'ok', { title: t('Relations updated') });
       await load(true);
     }
   }
@@ -385,15 +386,15 @@ export async function openErd({ focus } = {}) {
     const onUpd = select(RULES, 'NO ACTION');
     const flow = h('div', { class: 'row', style: { justifyContent: 'center', gap: '14px', padding: '6px 0' }, html: `<span class="chip info">${esc(child)}.${esc(childCol)}</span>${icon('arrow-right')}<span class="chip ok">${esc(parent)}.${esc(parentCol)}</span>` });
     modal({
-      title: 'Buat relasi',
-      sub: 'Kolom anak (foreign key) → kolom induk yang dirujuk',
+      title: t('Create relation'),
+      sub: t('Child column (foreign key) → referenced parent column'),
       icon: 'git-fork',
-      body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, flow, field('Nama constraint', name), h('div', { class: 'form-grid' }, field('ON DELETE', onDel), field('ON UPDATE', onUpd))),
+      body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, flow, field(t('Constraint name'), name), h('div', { class: 'form-grid' }, field('ON DELETE', onDel), field('ON UPDATE', onUpd))),
       actions: [
         'spacer',
-        { label: 'Batal' },
+        { label: t('Cancel') },
         {
-          label: 'Lanjut',
+          label: t('Continue'),
           kind: 'primary',
           icon: 'arrow-right',
           onClick: () => {
@@ -401,7 +402,7 @@ export async function openErd({ focus } = {}) {
               changeFks(
                 child,
                 (m) => m.foreignKeys.push({ name: name.value.trim(), columns: [childCol], refTable: parent, refColumns: [parentCol], onDelete: onDel.value, onUpdate: onUpd.value }),
-                `Relasi ${child}.${childCol} → ${parent}.${parentCol}`,
+                t('Relation {from} → {to}', { from: `${child}.${childCol}`, to: `${parent}.${parentCol}` }),
               ).catch((e) => toast(e.message, 'err')),
             );
             return true;
@@ -416,15 +417,15 @@ export async function openErd({ focus } = {}) {
     showMenu(e, [
       { label: `${l.from}(${f.columns.join(', ')}) → ${l.to}(${f.refColumns.join(', ')})`, header: true },
       { label: `ON DELETE ${f.onDelete || 'NO ACTION'} · ON UPDATE ${f.onUpdate || 'NO ACTION'}`, header: true },
-      { label: `Buka ${l.from}`, icon: 'table', action: () => app.openTableTab(l.from) },
-      { label: `Buka ${l.to}`, icon: 'table', action: () => app.openTableTab(l.to) },
+      { label: t('Open {name}', { name: l.from }), icon: 'table', action: () => app.openTableTab(l.from) },
+      { label: t('Open {name}', { name: l.to }), icon: 'table', action: () => app.openTableTab(l.to) },
       '-',
       {
-        label: 'Hapus relasi…',
+        label: t('Drop relation…'),
         icon: 'unlink',
         danger: true,
         action: () =>
-          changeFks(l.from, (m) => (m.foreignKeys = m.foreignKeys.filter((x) => !(x.columns.join() === f.columns.join() && x.refTable === f.refTable))), `Hapus relasi ${f.name}`).catch((err) => toast(err.message, 'err')),
+          changeFks(l.from, (m) => (m.foreignKeys = m.foreignKeys.filter((x) => !(x.columns.join() === f.columns.join() && x.refTable === f.refTable))), t('Drop relation {name}', { name: f.name })).catch((err) => toast(err.message, 'err')),
       },
     ]);
   }
@@ -530,7 +531,7 @@ export async function openErd({ focus } = {}) {
   function focusTable(name) {
     const p = st.pos.get(name);
     const el = cards.get(name);
-    if (!p || !el) return toast(`Tabel ${name} tidak ada di ERD`, 'err');
+    if (!p || !el) return toast(t('Table {name} is not in the ERD', { name }), 'err');
     const z = Math.max(st.view.z, 0.9);
     animateView({ z, x: viewport.clientWidth / 2 - (p.x + W / 2) * z, y: viewport.clientHeight / 2 - (p.y + 80) * z }, true);
     el.classList.remove('found');

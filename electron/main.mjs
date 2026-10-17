@@ -15,6 +15,9 @@ if (!app.requestSingleInstanceLock()) app.quit();
 let win = null;
 let server = null;
 let baseUrl = null;
+// Replaced by lib/i18n.js's t() once the server has started (it reads the saved language from settings.json).
+let t = (s) => s;
+let lang = () => 'en';
 
 // The bundled demo database lives inside the read-only app archive; give the user a writable copy.
 function prepareDemo() {
@@ -61,21 +64,23 @@ function createWindow() {
   win.webContents.on('will-prevent-unload', (e) => {
     const choice = dialog.showMessageBoxSync(win, {
       type: 'warning',
-      buttons: ['Tutup tanpa menyimpan', 'Batal'],
+      buttons: [t('Close without saving'), t('Cancel')],
       defaultId: 1,
       cancelId: 1,
-      title: 'Perubahan belum disimpan',
-      message: 'Ada perubahan yang belum disimpan.',
-      detail: 'Jika ditutup sekarang, perubahan tersebut akan hilang.',
+      title: t('Unsaved changes'),
+      message: t('There are unsaved changes.'),
+      detail: t('If you close now, those changes will be lost.'),
     });
     if (choice === 0) e.preventDefault();
   });
 
   // Ask where to save exports instead of dropping them silently into ~/Downloads.
   win.webContents.session.on('will-download', (_e, item) => {
-    item.setSaveDialogOptions({ title: 'Simpan file', defaultPath: join(app.getPath('downloads'), item.getFilename()) });
+    item.setSaveDialogOptions({ title: t('Save file'), defaultPath: join(app.getPath('downloads'), item.getFilename()) });
   });
 
+  // The menu follows the UI language; switching language reloads the page, so rebuild it on every load.
+  win.webContents.on('did-finish-load', buildMenu);
   win.loadURL(baseUrl);
   win.on('closed', () => (win = null));
 }
@@ -87,44 +92,47 @@ function buildMenu() {
       {
         label: 'DBStudio',
         submenu: [
-          { label: 'Tentang DBStudio', click: send("location.hash = 'about'") },
+          { label: t('About DBStudio'), click: send("location.hash = 'about'") },
           { type: 'separator' },
-          { label: 'Koneksi baru…', accelerator: 'CmdOrCtrl+Shift+N', click: send("document.querySelector('#btn-new-conn')?.click()") },
-          { label: 'Palet perintah', accelerator: 'CmdOrCtrl+K', click: send("document.querySelector('#btn-palette')?.click()") },
+          { label: t('Settings…'), accelerator: 'CmdOrCtrl+,', click: send("document.querySelector('#btn-settings')?.click()") },
           { type: 'separator' },
-          { role: 'quit', label: 'Keluar' },
+          { label: t('New connection…'), accelerator: 'CmdOrCtrl+Shift+N', click: send("document.querySelector('#btn-new-conn')?.click()") },
+          { label: t('Command palette'), accelerator: 'CmdOrCtrl+K', click: send("document.querySelector('#btn-palette')?.click()") },
+          { type: 'separator' },
+          { role: 'quit', label: t('Quit') },
         ],
       },
       {
-        label: 'Edit',
+        label: t('Edit'),
         submenu: [
-          { role: 'undo', label: 'Urungkan' },
-          { role: 'redo', label: 'Ulangi' },
+          { role: 'undo', label: t('Undo') },
+          { role: 'redo', label: t('Redo') },
           { type: 'separator' },
-          { role: 'cut', label: 'Potong' },
-          { role: 'copy', label: 'Salin' },
-          { role: 'paste', label: 'Tempel' },
-          { role: 'selectAll', label: 'Pilih semua' },
+          { role: 'cut', label: t('Cut') },
+          { role: 'copy', label: t('Copy') },
+          { role: 'paste', label: t('Paste') },
+          { role: 'selectAll', label: t('Select all') },
         ],
       },
       {
-        label: 'Tampilan',
+        // "View" is already a key for database views ("View" in Indonesian too), so the menu title is picked here.
+        label: lang() === 'id' ? 'Tampilan' : 'View',
         submenu: [
-          { role: 'reload', label: 'Muat ulang' },
-          { role: 'toggleDevTools', label: 'Developer tools' },
+          { role: 'reload', label: t('Reload') },
+          { role: 'toggleDevTools', label: t('Developer tools') },
           { type: 'separator' },
-          { role: 'resetZoom', label: 'Ukuran normal' },
-          { role: 'zoomIn', label: 'Perbesar' },
-          { role: 'zoomOut', label: 'Perkecil' },
+          { role: 'resetZoom', label: t('Actual size') },
+          { role: 'zoomIn', label: t('Zoom in') },
+          { role: 'zoomOut', label: t('Zoom out') },
           { type: 'separator' },
-          { role: 'togglefullscreen', label: 'Layar penuh' },
+          { role: 'togglefullscreen', label: t('Full screen') },
         ],
       },
       {
-        label: 'Bantuan',
+        label: t('Help'),
         submenu: [
-          { label: 'Tentang pengembang', click: send("location.hash = 'about'") },
-          { label: 'Situs sifirman.com', click: () => shell.openExternal('https://sifirman.com') },
+          { label: t('About the developer'), click: send("location.hash = 'about'") },
+          { label: t('Website sifirman.com'), click: () => shell.openExternal('https://sifirman.com') },
         ],
       },
     ]),
@@ -141,11 +149,16 @@ app.whenReady().then(async () => {
   try {
     prepareDemo();
     const { startServer } = await import('../server.js');
-    const started = await startServer({ port: 0 });
+    // A fixed port keeps the page origin stable, so localStorage (query tabs, history, favorites) survives restarts.
+    // If it is taken (e.g. by another program), fall back to any free port.
+    const started = await startServer({ port: 51740 }).catch(() => startServer({ port: 0 }));
     server = started.server;
     baseUrl = `http://127.0.0.1:${started.port}/`;
+    // Same process as the server, so this shares its settings (and sees language switches immediately).
+    ({ t, lang } = await import('../lib/i18n.js'));
   } catch (e) {
-    dialog.showErrorBox('DBStudio gagal dijalankan', String(e?.stack || e));
+    // Runs before the translations are available, so this one stays in English.
+    dialog.showErrorBox('DBStudio failed to start', String(e?.stack || e));
     app.quit();
     return;
   }

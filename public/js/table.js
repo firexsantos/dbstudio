@@ -5,11 +5,14 @@ import {
 } from './core.js';
 import { addTab, activateTab, renderTabs, findTab } from './tabs.js';
 import { renderGrid, nextSort, toCSV } from './grid.js';
+import { exportMenu } from './exporters.js';
+import { openValueViewer, renderForm } from './viewer.js';
 import { countUp } from './fx.js';
+import { t, plural } from './i18n.js';
 
 const newPending = () => ({ edits: new Map(), deletes: new Set(), inserts: [] });
-function pendingCount(t) {
-  const p = t.pending;
+function pendingCount(tab) {
+  const p = tab.pending;
   let n = p.deletes.size + p.inserts.length;
   for (const [r, m] of p.edits) if (m.size && !p.deletes.has(r)) n++;
   return n;
@@ -26,52 +29,59 @@ export async function schemaOf(connId, ns, { fresh = false } = {}) {
 }
 export const invalidateSchema = () => schemaCache.clear();
 
-export function openTableTab(table, sub = 'data') {
+export function openTableTab(table, sub = 'data', opts = {}) {
   const a = state.active;
   if (!a) return;
-  const existing = findTab((t) => t.kind === 'table' && t.connId === a.conn.id && t.ns === a.ns && t.table === table);
+  const existing = findTab((x) => x.kind === 'table' && x.connId === a.conn.id && x.ns === a.ns && x.table === table);
   if (existing) {
     activateTab(existing.id);
     existing.setSub(sub);
+    if (opts.filter != null) {
+      existing.filter = opts.filter;
+      existing.ui.filterInput.value = opts.filter;
+      existing.offset = 0;
+      loadData(existing);
+    }
     return existing;
   }
-  const isView = state.tables.find((t) => t.name === table)?.kind === 'view';
+  const isView = state.tables.find((x) => x.name === table)?.kind === 'view';
   const panel = h('div');
   const subtabs = h('div', { class: 'subtabs' });
   const SUBS = [
-    ['data', 'Data', 'table'],
-    ['structure', 'Struktur', 'list-tree'],
-    ['relations', 'Relasi & Index', 'git-fork'],
+    ['data', t('Data'), 'table'],
+    ['structure', t('Structure'), 'list-tree'],
+    ['relations', t('Relations & indexes'), 'git-fork'],
     ['ddl', 'DDL', 'file-code-2'],
-    ['info', 'Info', 'info'],
+    ['info', t('Info'), 'info'],
   ];
   for (const [k, label, ico] of SUBS) subtabs.append(h('button', { class: 'subtab', 'data-sub': k, html: icon(ico) + label }));
   subtabs.append(
     h('span', { class: 'spacer' }),
-    isView ? null : h('button', { class: 'btn sm ghost', html: icon('pencil-ruler') + '<span>Desain</span>', onclick: () => app.openDesigner(table) }),
+    isView ? null : h('button', { class: 'btn sm ghost', html: icon('pencil-ruler') + `<span>${t('Design')}</span>`, onclick: () => app.openDesigner(table) }),
     isView ? null : h('button', { class: 'btn sm ghost', html: icon('workflow') + '<span>ERD</span>', onclick: () => app.openTool('erd', { focus: table }) }),
   );
 
   // ---- data panel
-  const filterInput = h('input', { placeholder: "mis. id > 10 AND status = 'aktif'  — Enter" });
-  const limitSel = h('select', { class: 'select sm', style: { width: '78px' }, title: 'Baris per halaman' }, ...[50, 100, 500, 1000].map((n) => h('option', { value: n, selected: n === 100 }, String(n))));
+  const filterInput = h('input', { placeholder: t("e.g. id > 10 AND status = 'active'  — Enter") });
+  const limitSel = h('select', { class: 'select sm', style: { width: '78px' }, title: t('Rows per page') }, ...[50, 100, 500, 1000].map((n) => h('option', { value: n, selected: n === 100 }, String(n))));
   const pageInfo = h('span', { class: 'info' });
   const pending = h('span', { class: 'chip warn', hidden: true });
   const B = (ico, label, tip, kind = '') => h('button', { class: `btn sm ${kind}`, title: tip || '', html: icon(ico) + (label ? `<span>${label}</span>` : '') });
-  const bRefresh = B('refresh-cw', '', 'Muat ulang');
-  const bAdd = B('plus', 'Baris', 'Tambah baris');
-  const bDel = B('trash-2', 'Hapus', 'Klik nomor baris untuk memilih (Ctrl/Shift untuk banyak)', 'danger');
-  const bDiscard = B('undo-2', 'Batal');
-  const bApply = B('save', 'Simpan', 'Ctrl+S — semua perubahan dalam satu transaksi', 'primary');
-  const bPrev = B('chevron-left', '', 'Sebelumnya');
-  const bNext = B('chevron-right', '', 'Berikutnya');
-  const bExport = B('download', '', 'Export');
-  const notice = h('div', { class: 'notice warn', style: { margin: '10px 12px 0' }, hidden: true, html: icon('lock') + '<div>Tabel/view ini tidak punya <b>primary key</b>, jadi datanya hanya-baca di sini. Ubah lewat tab Query, atau tambahkan primary key di Desain tabel.</div>' });
+  const bRefresh = B('refresh-cw', '', t('Refresh'));
+  const bAdd = B('plus', t('Row'), t('Add row'));
+  const bDel = B('trash-2', t('Delete'), t('Click row numbers to select (Ctrl/Shift for several)'), 'danger');
+  const bDiscard = B('undo-2', t('Cancel'));
+  const bApply = B('save', t('Save'), t('Ctrl+S — all changes in one transaction'), 'primary');
+  const bPrev = B('chevron-left', '', t('Previous'));
+  const bNext = B('chevron-right', '', t('Next'));
+  const bExport = B('download', '', t('Export'));
+  const bForm = B('notebook-tabs', '', t('Form view (one row per page)'));
+  const notice = h('div', { class: 'notice warn', style: { margin: '10px 12px 0' }, hidden: true, html: icon('lock') + `<div>${t('This table/view has no <b>primary key</b>, so its data is read-only here. Edit it from a query tab, or add a primary key in the table designer.')}</div>` });
   const gridWrap = h('div', { class: 'grid-wrap' }, ...Array.from({ length: 8 }, () => h('div', { class: 'skeleton', style: { height: '22px', margin: '10px 14px' } })));
   const dataPanel = h(
     'div',
     { class: 'subpanel', 'data-sub': 'data' },
-    h('div', { class: 'toolbar' }, h('div', { class: 'filter-box' }, h('span', { text: 'WHERE' }), filterInput), bRefresh, bAdd, bDel, pending, bDiscard, bApply, h('span', { class: 'spacer' }), limitSel, bPrev, pageInfo, bNext, bExport),
+    h('div', { class: 'toolbar' }, h('div', { class: 'filter-box' }, h('span', { text: 'WHERE' }), filterInput), bRefresh, bAdd, bDel, pending, bDiscard, bApply, h('span', { class: 'spacer' }), bForm, limitSel, bPrev, pageInfo, bNext, bExport),
     notice,
     gridWrap,
   );
@@ -81,7 +91,7 @@ export function openTableTab(table, sub = 'data') {
   const ddlPanel = h(
     'div',
     { class: 'subpanel', 'data-sub': 'ddl', hidden: true },
-    h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', html: icon('copy') + '<span>Salin</span>', onclick: () => tab.ddl != null && copyText(tab.ddl) }), h('button', { class: 'btn sm', html: icon('square-terminal') + '<span>Buka di tab query</span>', onclick: () => tab.ddl != null && app.newQueryTab(tab.ddl) })),
+    h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', html: icon('copy') + `<span>${t('Copy')}</span>`, onclick: () => tab.ddl != null && copyText(tab.ddl) }), h('button', { class: 'btn sm', html: icon('square-terminal') + `<span>${t('Open in a query tab')}</span>`, onclick: () => tab.ddl != null && app.newQueryTab(tab.ddl) })),
     ddlBox,
   );
   const infoPanel = h('div', { class: 'subpanel', 'data-sub': 'info', hidden: true }, h('div', { class: 'scroll-pad' }));
@@ -132,7 +142,7 @@ export function openTableTab(table, sub = 'data') {
   tab.ui = { gridWrap, pageInfo, pending, bAdd, bDel, bDiscard, bApply, bPrev, bNext, notice, filterInput };
   addTab(tab);
 
-  const guard = async () => !tab.isDirty() || confirmDialog({ title: 'Buang perubahan?', message: 'Ada perubahan data yang belum disimpan.', danger: true, confirmLabel: 'Buang' });
+  const guard = async () => !tab.isDirty() || confirmDialog({ title: t('Discard changes?'), message: t('There are unsaved data changes.'), danger: true, confirmLabel: t('Discard') });
   filterInput.onkeydown = async (e) => {
     if (e.key !== 'Enter' || !(await guard())) return;
     tab.filter = filterInput.value.trim();
@@ -165,14 +175,77 @@ export function openTableTab(table, sub = 'data') {
   };
   bApply.onclick = () => applyChanges(tab);
   bExport.onclick = (e) =>
-    showMenu(e, [
-      { label: 'Halaman ini → CSV', icon: 'file-spreadsheet', action: () => tab.data && downloadText(`${table}.csv`, toCSV(tab.data.columns, tab.data.rows), 'text/csv') },
-      { label: 'Seluruh tabel → CSV / JSON / SQL…', icon: 'download', action: () => app.openTransfer({ tab: 'export-data', table }) },
-    ]);
+    tab.data &&
+    exportMenu(e, {
+      columns: tab.data.columns,
+      rows: tab.data.rows,
+      name: table,
+      type: tab.connType,
+      extra: ['-', { label: t('Whole table (all pages)…'), icon: 'database', action: () => app.openTransfer({ tab: 'export-data', table }) }],
+    });
+  bForm.onclick = () => {
+    tab.mode = tab.mode === 'form' ? 'grid' : 'form';
+    tab.formRow = tab.grid?.active?.()?.r ?? tab.formRow ?? 0;
+    bForm.classList.toggle('primary', tab.mode === 'form');
+    renderData(tab);
+  };
+  tab.ui.bForm = bForm;
   tab.guard = guard;
+  if (opts.filter) {
+    tab.filter = opts.filter;
+    filterInput.value = opts.filter;
+  }
   tab.setSub(sub);
   loadData(tab);
+  describe(tab)
+    .then((m) => {
+      tab.fkMap = new Map();
+      for (const fk of m.foreignKeys) fk.columns.forEach((c, i) => tab.fkMap.set(c, { table: fk.refTable, column: fk.refColumns[i] }));
+      if (tab.data && tab.fkMap.size) renderData(tab);
+    })
+    .catch(() => {});
+  schemaOf(a.conn.id, a.ns)
+    .then((all) => (tab.incoming = all.flatMap((m) => m.foreignKeys.filter((fk) => fk.refTable === table).map((fk) => ({ ...fk, from: m.name })))))
+    .catch(() => {});
+  panel.addEventListener('keydown', (e) => {
+    if (tab.mode !== 'form' || !tab.data) return;
+    if (e.key === 'PageDown') (e.preventDefault(), (tab.formRow += 1), renderData(tab));
+    if (e.key === 'PageUp') (e.preventDefault(), (tab.formRow = Math.max(0, tab.formRow - 1)), renderData(tab));
+  });
   return tab;
+}
+
+function openFk(tab, c, v) {
+  const ref = tab.fkMap?.get(tab.data.columns[c]);
+  if (!ref) return;
+  openTableTab(ref.table, 'data', { filter: `${quoteIdent(ref.column, tab.connType)} = ${sqlLiteral(v)}` });
+}
+
+// "Rows referencing this one": child tables whose FK points at this table.
+function incomingMenu(tab, r) {
+  const refs = tab.incoming || [];
+  if (!refs.length || r >= tab.data.rows.length) return [];
+  return refs.slice(0, 6).map((fk) => {
+    const i = tab.data.columns.indexOf(fk.refColumns[0]);
+    const v = i >= 0 ? tab.data.rows[r][i] : null;
+    return {
+      label: t('Referenced by {ref}', { ref: `${fk.from}.${fk.columns[0]}` }),
+      icon: 'arrow-down-left',
+      disabled: v == null,
+      action: () => openTableTab(fk.from, 'data', { filter: `${quoteIdent(fk.columns[0], tab.connType)} = ${sqlLiteral(v)}` }),
+    };
+  });
+}
+
+function viewCell(tab, r, c) {
+  const p = tab.pending;
+  openValueViewer({
+    value: tableValue(tab, r, c),
+    column: tab.data.columns[c],
+    type: tab.meta[c]?.type,
+    editable: tab.canEdit && !p.deletes.has(r),
+    onSave: (v) => setCell(tab, r, c, v),
+  });
 }
 
 async function loadData(tab) {
@@ -224,6 +297,27 @@ function renderData(tab, fresh = false) {
   const u = tab.ui;
   const flash = tab.flash;
   tab.flash = new Set();
+  const fkOf = (c) => tab.fkMap?.get(d.columns[c]) || null;
+  if (tab.mode === 'form') {
+    tab.formRow = Math.max(0, Math.min((n + p.inserts.length) - 1, tab.formRow || 0));
+    renderForm(u.gridWrap, {
+      columns: d.columns,
+      meta: tab.meta,
+      count: n + p.inserts.length,
+      row: tab.formRow,
+      getValue: (r, c) => tableValue(tab, r, c),
+      editable: (r) => tab.canEdit && !p.deletes.has(r),
+      onEdit: (r, c, v) => setCell(tab, r, c, v),
+      fk: fkOf,
+      onOpenFk: (c, v) => openFk(tab, c, v),
+      onNav: (r) => ((tab.formRow = r), renderData(tab)),
+      rowLabel: (r) => (r >= n ? t('new') : fmtNum(d.offset + r + 1)),
+      rowState: (r) => (r >= n ? { cls: 'ok', label: t('new row') } : p.deletes.has(r) ? { cls: 'danger', label: t('to be deleted') } : p.edits.get(r)?.size ? { cls: 'warn', label: t('modified') } : null),
+      dirty: (r, c) => r < n && p.edits.get(r)?.has(c),
+    });
+    renderChrome(tab);
+    return;
+  }
   tab.grid = renderGrid(u.gridWrap, {
     columns: d.columns,
     meta: tab.meta,
@@ -241,7 +335,14 @@ function renderData(tab, fresh = false) {
     },
     rowLabel: (r) => (r >= n ? '+' : fmtNum(d.offset + r + 1)),
     rowClass: (r) => (r >= n ? 'row-new' : p.deletes.has(r) ? 'row-deleted' : ''),
-    cellClass: (r, c) => (r < n && p.edits.get(r)?.has(c) ? 'dirty' : ''),
+    cellClass: (r, c) => [r < n && p.edits.get(r)?.has(c) ? 'dirty' : '', fkOf(c) && tableValue(tab, r, c) != null ? 'fk-cell' : ''].join(' '),
+    onCellClick: (r, c, e) => {
+      if ((e.ctrlKey || e.metaKey) && fkOf(c)) {
+        const v = tableValue(tab, r, c);
+        if (v != null) openFk(tab, c, v);
+      }
+    },
+    onViewKey: (r, c) => viewCell(tab, r, c),
     selected: tab.selected,
     editable: (r) => tab.canEdit && !p.deletes.has(r),
     onEdit: (r, c, v) => setCell(tab, r, c, v),
@@ -264,14 +365,21 @@ function renderData(tab, fresh = false) {
     onDeleteKey: () => tab.canEdit && tab.selected.size && toggleDelete(tab, [...tab.selected]),
     onCellMenu: (e, r, c) => cellMenu(tab, e, r, c),
   });
+  renderChrome(tab);
+}
+
+function renderChrome(tab) {
+  const d = tab.data;
+  const n = d.rows.length;
+  const u = tab.ui;
   const from = n ? d.offset + 1 : 0;
-  u.pageInfo.textContent = `${fmtNum(from)}–${fmtNum(d.offset + n)} dari ${fmtNum(d.total)}`;
+  u.pageInfo.textContent = t('{from}–{to} of {total}', { from: fmtNum(from), to: fmtNum(d.offset + n), total: fmtNum(d.total) });
   u.bPrev.disabled = d.offset === 0;
   u.bNext.disabled = d.offset + n >= d.total;
   u.notice.hidden = tab.canEdit;
   const count = pendingCount(tab);
   u.pending.hidden = !count;
-  u.pending.innerHTML = `${icon('pencil')} ${count} perubahan`;
+  u.pending.innerHTML = `${icon('pencil')} ${plural(count, '{n} change', '{n} changes')}`;
   u.bApply.hidden = u.bDiscard.hidden = !count;
   u.bAdd.disabled = !tab.canEdit;
   u.bDel.disabled = !tab.canEdit || !tab.selected.size;
@@ -284,26 +392,30 @@ function cellMenu(tab, e, r, c) {
   const v = tableValue(tab, r, c);
   const col = d.columns[c];
   const isNew = r >= d.rows.length;
-  const t = tab.connType;
+  const ct = tab.connType;
   showMenu(e, [
-    { label: 'Salin nilai', icon: 'copy', action: () => copyText(valStr(v)) },
-    { label: 'Salin baris (JSON)', icon: 'braces', action: () => copyText(JSON.stringify(Object.fromEntries(d.columns.map((cn, i) => [cn, tableValue(tab, r, i)])), null, 2)) },
+    { label: t('View / edit value…'), icon: 'maximize-2', action: () => viewCell(tab, r, c) },
+    tab.fkMap?.get(col) && v != null ? { label: t('Open reference: {ref} = {value}', { ref: `${tab.fkMap.get(col).table}.${tab.fkMap.get(col).column}`, value: valStr(v).slice(0, 20) }), icon: 'arrow-up-right', action: () => openFk(tab, c, v) } : null,
+    ...incomingMenu(tab, r),
+    '-',
+    { label: t('Copy value'), icon: 'copy', action: () => copyText(valStr(v)) },
+    { label: t('Copy row (JSON)'), icon: 'braces', action: () => copyText(JSON.stringify(Object.fromEntries(d.columns.map((cn, i) => [cn, tableValue(tab, r, i)])), null, 2)) },
     {
-      label: 'Salin sebagai INSERT',
+      label: t('Copy as INSERT'),
       icon: 'file-plus-2',
       action: () =>
-        copyText(`INSERT INTO ${quoteIdent(tab.table, t)} (${d.columns.map((cn) => quoteIdent(cn, t)).join(', ')}) VALUES (${d.columns.map((_, i) => sqlLiteral(tableValue(tab, r, i))).join(', ')});`),
+        copyText(`INSERT INTO ${quoteIdent(tab.table, ct)} (${d.columns.map((cn) => quoteIdent(cn, ct)).join(', ')}) VALUES (${d.columns.map((_, i) => sqlLiteral(tableValue(tab, r, i))).join(', ')});`),
     },
     '-',
-    { label: 'Edit sel', icon: 'pencil', disabled: !tab.canEdit || p.deletes.has(r), action: () => tab.grid.edit(r, c) },
+    { label: t('Edit cell'), icon: 'pencil', disabled: !tab.canEdit || p.deletes.has(r), action: () => tab.grid.edit(r, c) },
     { label: 'Set NULL', icon: 'circle-slash', disabled: !tab.canEdit || p.deletes.has(r), action: () => setCell(tab, r, c, null) },
     {
-      label: `Filter: ${col} = nilai ini`,
+      label: t('Filter: {column} = this value', { column: col }),
       icon: 'filter',
       disabled: isNew,
       action: async () => {
         if (!(await tab.guard())) return;
-        tab.filter = v == null ? `${quoteIdent(col, t)} IS NULL` : `${quoteIdent(col, t)} = ${sqlLiteral(v)}`;
+        tab.filter = v == null ? `${quoteIdent(col, ct)} IS NULL` : `${quoteIdent(col, ct)} = ${sqlLiteral(v)}`;
         tab.ui.filterInput.value = tab.filter;
         tab.offset = 0;
         loadData(tab);
@@ -311,7 +423,7 @@ function cellMenu(tab, e, r, c) {
     },
     '-',
     {
-      label: isNew ? 'Buang baris baru' : p.deletes.has(r) ? 'Batalkan hapus' : 'Tandai hapus baris',
+      label: isNew ? t('Discard new row') : p.deletes.has(r) ? t('Undo delete') : t('Mark row for deletion'),
       icon: p.deletes.has(r) ? 'undo-2' : 'trash-2',
       danger: !p.deletes.has(r),
       disabled: !tab.canEdit,
@@ -360,12 +472,12 @@ async function applyChanges(tab) {
   b.classList.add('loading');
   try {
     const r = await api('POST', `/api/c/${tab.connId}/apply`, { ns: tab.ns, table: tab.table, ops });
-    toast(`${r.applied} perubahan · ${r.affected} baris`, 'ok', { title: 'Tersimpan' });
+    toast(`${plural(r.applied, '{n} change', '{n} changes')} · ${plural(r.affected, '{n} row', '{n} rows')}`, 'ok', { title: t('Saved') });
     await loadData(tab);
     tab.flash = new Set(edited);
     if (tab.flash.size) renderData(tab);
   } catch (e) {
-    toast(e.message, 'err', { title: 'Gagal menyimpan — transaksi dibatalkan' });
+    toast(e.message, 'err', { title: t('Save failed — transaction rolled back') });
   } finally {
     b.classList.remove('loading');
   }
@@ -386,7 +498,7 @@ async function loadStructure(tab, panel) {
     for (const fk of m.foreignKeys) fk.columns.forEach((c, i) => fkCols.set(c, `${fk.refTable}.${fk.refColumns[i]}`));
     const uniq = new Set(m.indexes.filter((i) => i.unique && i.columns.length === 1).map((i) => i.columns[0]));
     renderGrid(wrap, {
-      columns: ['Kolom', 'Tipe', 'Null', 'Default', 'Kunci', 'Auto', 'Komentar'],
+      columns: [t('Column'), t('Type'), 'Null', 'Default', t('Key'), 'Auto', t('Comment')],
       rows: m.columns.map((c) => [
         c.name,
         c.type,
@@ -411,32 +523,32 @@ async function loadRelations(tab, panel) {
   box.append(h('div', { class: 'skeleton', style: { height: '120px' } }));
   try {
     const [m, all] = await Promise.all([describe(tab), schemaOf(tab.connId, tab.ns)]);
-    const incoming = all.flatMap((t) => t.foreignKeys.filter((fk) => fk.refTable === tab.table).map((fk) => ({ ...fk, from: t.name })));
+    const incoming = all.flatMap((x) => x.foreignKeys.filter((fk) => fk.refTable === tab.table).map((fk) => ({ ...fk, from: x.name })));
     const rule = (fk) => [fk.onDelete && fk.onDelete !== 'NO ACTION' ? `ON DELETE ${fk.onDelete}` : '', fk.onUpdate && fk.onUpdate !== 'NO ACTION' ? `ON UPDATE ${fk.onUpdate}` : ''].filter(Boolean).join(' · ');
     const link = (name) => h('a', { href: '#', class: 'mono', text: name, onclick: (e) => (e.preventDefault(), openTableTab(name)) });
     const card = (title, ico, items, empty) =>
       h('div', { class: 'card', style: { marginBottom: '14px' } }, h('div', { class: 'card-title', html: icon(ico) + esc(title) + ` <span class="chip">${items.length}</span>` }), items.length ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, ...items) : h('div', { class: 'faint', text: empty }));
     box.innerHTML = '';
     box.append(
-      h('div', { class: 'row', style: { marginBottom: '14px' } }, h('button', { class: 'btn sm', html: icon('pencil-ruler') + '<span>Ubah di Desain tabel</span>', onclick: () => app.openDesigner(tab.table) }), h('button', { class: 'btn sm', html: icon('workflow') + '<span>Lihat di ERD</span>', onclick: () => app.openTool('erd', { focus: tab.table }) })),
-      card('Primary key', 'key-round', m.primaryKey.length ? [h('div', { class: 'mono', text: m.primaryKey.join(', ') })] : [], 'Tidak ada primary key'),
+      h('div', { class: 'row', style: { marginBottom: '14px' } }, h('button', { class: 'btn sm', html: icon('pencil-ruler') + `<span>${t('Edit in table designer')}</span>`, onclick: () => app.openDesigner(tab.table) }), h('button', { class: 'btn sm', html: icon('workflow') + `<span>${t('View in ERD')}</span>`, onclick: () => app.openTool('erd', { focus: tab.table }) })),
+      card(t('Primary key'), 'key-round', m.primaryKey.length ? [h('div', { class: 'mono', text: m.primaryKey.join(', ') })] : [], t('No primary key')),
       card(
-        'Relasi keluar (foreign key)',
+        t('Outgoing relations (foreign keys)'),
         'arrow-up-right',
         m.foreignKeys.map((fk) => h('div', { class: 'row wrap' }, h('span', { class: 'chip info', text: fk.name }), h('span', { class: 'mono', text: `(${fk.columns.join(', ')}) →` }), link(fk.refTable), h('span', { class: 'mono', text: `(${fk.refColumns.join(', ')})` }), rule(fk) ? h('span', { class: 'chip', text: rule(fk) }) : null)),
-        'Tabel ini tidak merujuk tabel lain.',
+        t('This table does not reference other tables.'),
       ),
       card(
-        'Dirujuk oleh',
+        t('Referenced by'),
         'arrow-down-left',
         incoming.map((fk) => h('div', { class: 'row wrap' }, link(fk.from), h('span', { class: 'mono', text: `(${fk.columns.join(', ')}) → (${fk.refColumns.join(', ')})` }), rule(fk) ? h('span', { class: 'chip', text: rule(fk) }) : null)),
-        'Tidak ada tabel lain yang merujuk tabel ini.',
+        t('No other table references this table.'),
       ),
       card(
-        'Index',
+        t('Indexes'),
         'list-ordered',
-        m.indexes.map((ix) => h('div', { class: 'row wrap' }, h('span', { class: `chip ${ix.unique ? 'ok' : ''}`, text: ix.unique ? 'UNIQUE' : 'INDEX' }), h('span', { class: 'mono', text: ix.name }), h('span', { class: 'mono faint', text: ix.complex ? ix.def || '(ekspresi)' : `(${ix.columns.join(', ')})` }))),
-        'Tidak ada index selain primary key.',
+        m.indexes.map((ix) => h('div', { class: 'row wrap' }, h('span', { class: `chip ${ix.unique ? 'ok' : ''}`, text: ix.unique ? 'UNIQUE' : 'INDEX' }), h('span', { class: 'mono', text: ix.name }), h('span', { class: 'mono faint', text: ix.complex ? ix.def || t('(expression)') : `(${ix.columns.join(', ')})` }))),
+        t('No indexes besides the primary key.'),
       ),
     );
   } catch (e) {
@@ -464,20 +576,20 @@ async function loadInfo(tab, panel) {
     const total = tab.data?.total;
     const dl = h('dl', { class: 'kv' });
     const add = (k, v) => dl.append(h('dt', { text: k }), h('dd', { text: v == null || v === '' ? '–' : String(v) }));
-    add('Nama', m.name);
-    add(state.active?.conn.type === 'postgres' ? 'Schema' : 'Database', tab.ns);
-    add('Jenis', m.kind === 'view' ? 'View' : 'Tabel');
-    add('Jumlah baris (pasti)', total != null ? fmtNum(total) : '…');
-    add('Estimasi baris (statistik)', m.rowsEstimate != null ? fmtNum(m.rowsEstimate) : null);
-    add('Kolom', m.columns.length);
-    add('Index', m.indexes.length);
-    add('Foreign key', m.foreignKeys.length);
+    add(t('Name'), m.name);
+    add(state.active?.conn.type === 'postgres' ? t('Schema') : t('Database'), tab.ns);
+    add(t('Kind'), m.kind === 'view' ? t('View') : t('Table'));
+    add(t('Row count (exact)'), total != null ? fmtNum(total) : '…');
+    add(t('Estimated rows (statistics)'), m.rowsEstimate != null ? fmtNum(m.rowsEstimate) : null);
+    add(t('Columns'), m.columns.length);
+    add(t('Indexes'), m.indexes.length);
+    add(t('Foreign keys'), m.foreignKeys.length);
     if (m.engine) add('Engine', m.engine);
     if (m.collation) add('Collation', m.collation);
-    add('Komentar', m.comment);
-    box.append(h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('info') + 'Informasi tabel' }), dl));
+    add(t('Comment'), m.comment);
+    box.append(h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('info') + t('Table information') }), dl));
     const big = h('div', { class: 'count-up', style: { font: '700 34px var(--display)', marginTop: '18px' } });
-    box.append(h('div', { class: 'card', style: { marginTop: '14px' } }, h('div', { class: 'section-label', text: 'Total baris' }), big));
+    box.append(h('div', { class: 'card', style: { marginTop: '14px' } }, h('div', { class: 'section-label', text: t('Total rows') }), big));
     countUp(big, total || 0, 900);
   } catch (e) {
     box.append(h('div', { class: 'result-error', text: e.message }));

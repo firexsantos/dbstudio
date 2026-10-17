@@ -1,6 +1,7 @@
 /* global CodeMirror */
 // Shared helpers, state and UI primitives for every DBStudio module.
 import { ICONS } from '/vendor/icons.js';
+import { t, LOCALE } from './i18n.js';
 
 // ---------------------------------------------------------------- DOM
 export const $ = (s, el = document) => el.querySelector(s);
@@ -14,7 +15,14 @@ export function h(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') {
+      // Object.assign() silently drops CSS custom properties (--x); setProperty handles both.
+      for (const [p, val] of Object.entries(v)) {
+        if (val == null) continue;
+        if (p.startsWith('--')) el.style.setProperty(p, String(val));
+        else el.style[p] = val;
+      }
+    }
     else if (k === 'html') el.innerHTML = v;
     else if (k === 'text') el.textContent = v;
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
@@ -62,7 +70,7 @@ export const local = {
   },
 };
 export const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
-export const fmtNum = (n) => (n == null || Number.isNaN(Number(n)) ? '–' : Number(n).toLocaleString('id-ID'));
+export const fmtNum = (n) => (n == null || Number.isNaN(Number(n)) ? '–' : Number(n).toLocaleString(LOCALE));
 export function fmtBytes(n) {
   if (!Number.isFinite(n)) return '–';
   const u = ['B', 'KB', 'MB', 'GB'];
@@ -73,18 +81,18 @@ export function fmtBytes(n) {
   }
   return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 }
-export function timeAgo(t) {
-  const s = Math.round((Date.now() - t) / 1000);
-  if (s < 60) return `${s} dtk lalu`;
-  if (s < 3600) return `${Math.round(s / 60)} mnt lalu`;
-  if (s < 86400) return `${Math.round(s / 3600)} jam lalu`;
-  return new Date(t).toLocaleDateString('id-ID');
+export function timeAgo(ts) {
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60) return t('{n}s ago', { n: s });
+  if (s < 3600) return t('{n}m ago', { n: Math.round(s / 60) });
+  if (s < 86400) return t('{n}h ago', { n: Math.round(s / 3600) });
+  return new Date(ts).toLocaleDateString(LOCALE);
 }
 export function debounce(fn, ms) {
-  let t;
+  let timer;
   return (...a) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...a), ms);
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...a), ms);
   };
 }
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -171,7 +179,7 @@ export const app = {}; // cross-module function registry
 const bus = new EventTarget();
 export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { detail }));
 export const on = (name, fn) => bus.addEventListener(name, (e) => fn(e.detail));
-export const currentTab = () => state.tabs.find((t) => t.id === state.activeTab);
+export const currentTab = () => state.tabs.find((x) => x.id === state.activeTab);
 export const connById = (id) => state.conns.find((c) => c.id === id);
 
 // ---------------------------------------------------------------- API
@@ -191,7 +199,7 @@ export async function api(method, url, body, { text = false } = {}) {
   try {
     res = await fetch(url, { method, headers, body: payload });
   } catch {
-    throw new Error('Server DBStudio tidak dapat dihubungi. Apakah `npm start` masih berjalan?');
+    throw new Error(t('The DBStudio server cannot be reached. Is `npm start` still running?'));
   }
   let data;
   try {
@@ -199,7 +207,7 @@ export async function api(method, url, body, { text = false } = {}) {
   } catch {
     data = { error: res.statusText };
   }
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { code: data.code || null });
   return data;
 }
 export const qs = (o) =>
@@ -228,9 +236,9 @@ export function toast(msg, kind = 'info', { title, timeout } = {}) {
 export async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
-    toast('Disalin ke clipboard', 'ok', { timeout: 1600 });
+    toast(t('Copied to clipboard'), 'ok', { timeout: 1600 });
   } catch {
-    toast('Gagal menyalin ke clipboard', 'err');
+    toast(t('Could not copy to clipboard'), 'err');
   }
 }
 
@@ -293,7 +301,7 @@ export function modal({ title, sub, icon: ico = 'sparkles', danger = false, body
       { class: 'modal-head' },
       h('div', { class: `mh-ico${danger ? ' danger' : ''}`, html: icon(ico) }),
       h('div', { class: 'grow' }, h('div', { class: 'mh-title', text: title }), sub ? h('div', { class: 'mh-sub', text: sub }) : null),
-      dismissable ? h('button', { class: 'btn ghost icon sm', html: icon('x'), onclick: () => close(), title: 'Tutup' }) : null,
+      dismissable ? h('button', { class: 'btn ghost icon sm', html: icon('x'), onclick: () => close(), title: t('Close') }) : null,
     ),
     h('div', { class: 'modal-body' }, bodyEl),
     foot,
@@ -351,27 +359,27 @@ export function modal({ title, sub, icon: ico = 'sparkles', danger = false, body
   return { el: box, body: bodyEl, close, foot };
 }
 
-export function confirmDialog({ title, message, danger = false, confirmLabel = 'Lanjutkan', icon: ico }) {
+export function confirmDialog({ title, message, danger = false, confirmLabel = t('Continue'), icon: ico }) {
   return new Promise((resolve) => {
     modal({
       title,
       icon: ico || (danger ? 'triangle-alert' : 'circle-help'),
       danger,
       body: h('div', { class: 'muted', html: message }),
-      actions: ['spacer', { label: 'Batal' }, { label: confirmLabel, kind: danger ? 'danger solid' : 'primary', onClick: () => true }],
+      actions: ['spacer', { label: t('Cancel') }, { label: confirmLabel, kind: danger ? 'danger solid' : 'primary', onClick: () => true }],
       onClose: (r) => resolve(r === true),
     });
   });
 }
 
-export function promptDialog({ title, label, value = '', placeholder = '', icon: ico = 'pencil', confirmLabel = 'Simpan' }) {
+export function promptDialog({ title, label, value = '', placeholder = '', icon: ico = 'pencil', confirmLabel = t('Save') }) {
   return new Promise((resolve) => {
     const input = h('input', { class: 'input', value, placeholder });
     const m = modal({
       title,
       icon: ico,
       body: h('div', { class: 'field' }, h('label', { text: label }), input),
-      actions: ['spacer', { label: 'Batal' }, { label: confirmLabel, kind: 'primary', onClick: () => input.value.trim() || false }],
+      actions: ['spacer', { label: t('Cancel') }, { label: confirmLabel, kind: 'primary', onClick: () => input.value.trim() || false }],
       onClose: (r) => resolve(typeof r === 'string' ? r : null),
     });
     input.addEventListener('keydown', (e) => {
@@ -409,7 +417,7 @@ export function createEditor(parent, { value = '', type = state.active?.conn.typ
  * Show generated SQL, let the user edit it, then run it on connId/ns.
  * Resolves true when executed successfully.
  */
-export function sqlPreview({ title, sub, statements, connId, ns, type, warnings = [], confirmLabel = 'Jalankan', danger = false, icon: ico = 'file-code-2' }) {
+export function sqlPreview({ title, sub, statements, connId, ns, type, warnings = [], confirmLabel = t('Run'), danger = false, icon: ico = 'file-code-2' }) {
   return new Promise((resolve) => {
     const original = statements.join('\n\n');
     const box = h('div', { class: 'code-box', style: { height: '320px', flex: 'none', margin: 0 } });
@@ -417,8 +425,8 @@ export function sqlPreview({ title, sub, statements, connId, ns, type, warnings 
       'div',
       { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
       ...warnings.map((w) => h('div', { class: 'notice warn', html: icon('triangle-alert') + `<div>${esc(w)}</div>` })),
-      statements.length ? box : h('div', { class: 'notice info', html: icon('info') + '<div>Tidak ada perubahan — SQL kosong.</div>' }),
-      h('div', { class: 'faint', style: { fontSize: '11.5px' }, html: `${icon('pencil')} SQL boleh diedit sebelum dijalankan.` }),
+      statements.length ? box : h('div', { class: 'notice info', html: icon('info') + `<div>${t('No changes — the SQL is empty.')}</div>` }),
+      h('div', { class: 'faint', style: { fontSize: '11.5px' }, html: `${icon('pencil')} ${t('You can edit the SQL before running it.')}` }),
     );
     let cm;
     const m = modal({
@@ -429,9 +437,9 @@ export function sqlPreview({ title, sub, statements, connId, ns, type, warnings 
       size: 'wide',
       body,
       actions: [
-        h('button', { class: 'btn ghost sm', html: icon('copy') + '<span>Salin</span>', onclick: () => copyText(cm?.getValue() || original) }),
+        h('button', { class: 'btn ghost sm', html: icon('copy') + `<span>${t('Copy')}</span>`, onclick: () => copyText(cm?.getValue() || original) }),
         'spacer',
-        { label: 'Batal' },
+        { label: t('Cancel') },
         {
           label: confirmLabel,
           kind: danger ? 'danger solid' : 'primary',

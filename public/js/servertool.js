@@ -2,6 +2,7 @@
 import { h, icon, esc, api, qs, state, app, toast, modal, sqlPreview, confirmDialog, toggle, checkbox, field, select, TYPE_LABEL, showMenu } from './core.js';
 import { addTab, activateTab, findTab } from './tabs.js';
 import { renderGrid } from './grid.js';
+import { t, plural } from './i18n.js';
 
 const MYSQL_PRIVS = ['ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'INDEX', 'REFERENCES', 'CREATE VIEW', 'SHOW VIEW', 'TRIGGER', 'EXECUTE', 'CREATE ROUTINE', 'ALTER ROUTINE', 'EVENT', 'LOCK TABLES', 'CREATE TEMPORARY TABLES'];
 const PG_PRIVS = ['ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
@@ -16,10 +17,10 @@ export function openServer() {
   const panel = h('div');
   const subtabs = h('div', { class: 'subtabs' });
   const SUBS = [
-    ['proc', 'Proses', 'activity', !sqlite],
-    ['vars', sqlite ? 'Pragma' : 'Variabel', 'sliders-horizontal', true],
-    ['status', 'Status', 'gauge', true],
-    ['users', 'Pengguna', 'users', !sqlite],
+    ['proc', t('Processes'), 'activity', !sqlite],
+    ['vars', sqlite ? 'Pragma' : t('Variables'), 'sliders-horizontal', true],
+    ['status', t('Status'), 'gauge', true],
+    ['users', t('Users'), 'users', !sqlite],
   ].filter((x) => x[3]);
   const panes = {};
   for (const [k, label, ico] of SUBS) subtabs.append(h('button', { class: 'subtab', 'data-sub': k, html: icon(ico) + label }));
@@ -29,7 +30,7 @@ export function openServer() {
   // ---- processes
   if (!sqlite) {
     const gw = h('div', { class: 'grid-wrap' });
-    const auto = toggle('Refresh otomatis (3 dtk)', false, (v) => {
+    const auto = toggle(t('Auto-refresh (3 s)'), false, (v) => {
       clearInterval(tab.timer);
       if (v) tab.timer = setInterval(() => !panes.proc.hidden && !panel.hidden && loadProc(), 3000);
     });
@@ -37,15 +38,15 @@ export function openServer() {
     const loadProc = async () => {
       try {
         const r = await api('GET', `/api/c/${a.conn.id}/server/processes`);
-        count.textContent = `${r.rows.length} koneksi`;
+        count.textContent = plural(r.rows.length, '{n} connection', '{n} connections');
         renderGrid(gw, {
           columns: r.columns,
           rows: r.rows,
           onCellMenu: (e, row) =>
             showMenu(e, [
-              { label: `Proses #${r.rows[row][0]}`, header: true },
-              { label: 'Hentikan query (KILL QUERY)', icon: 'square', action: () => kill(r.rows[row][0], 'query') },
-              { label: 'Putuskan koneksi (KILL)', icon: 'unplug', danger: true, action: () => kill(r.rows[row][0], 'connection') },
+              { label: t('Process #{id}', { id: r.rows[row][0] }), header: true },
+              { label: t('Stop query (KILL QUERY)'), icon: 'square', action: () => kill(r.rows[row][0], 'query') },
+              { label: t('Disconnect (KILL)'), icon: 'unplug', danger: true, action: () => kill(r.rows[row][0], 'connection') },
             ]),
         });
       } catch (e) {
@@ -54,24 +55,24 @@ export function openServer() {
       }
     };
     const kill = async (pid, mode) => {
-      const ok = await confirmDialog({ title: mode === 'query' ? 'Hentikan query?' : 'Putuskan koneksi?', message: `Proses <b>#${esc(pid)}</b> akan ${mode === 'query' ? 'dihentikan query-nya' : 'diputus'}.`, danger: true, confirmLabel: 'Ya' });
+      const ok = await confirmDialog({ title: mode === 'query' ? t('Stop query?') : t('Disconnect?'), message: mode === 'query' ? t('The query of process <b>#{pid}</b> will be stopped.', { pid: esc(pid) }) : t('Process <b>#{pid}</b> will be disconnected.', { pid: esc(pid) }), danger: true, confirmLabel: t('Yes') });
       if (!ok) return;
       try {
         await api('POST', `/api/c/${a.conn.id}/server/kill`, { pid, mode });
-        toast(`Proses #${pid} dihentikan`, 'ok');
+        toast(t('Process #{pid} stopped', { pid }), 'ok');
         loadProc();
       } catch (e) {
         toast(e.message, 'err');
       }
     };
-    panes.proc = h('div', { class: 'subpanel' }, h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', html: icon('refresh-cw') + '<span>Refresh</span>', onclick: loadProc }), auto, count, h('span', { class: 'spacer' }), h('span', { class: 'info', text: 'Klik kanan baris untuk menghentikan proses' })), gw);
+    panes.proc = h('div', { class: 'subpanel' }, h('div', { class: 'toolbar' }, h('button', { class: 'btn sm', html: icon('refresh-cw') + `<span>${t('Refresh')}</span>`, onclick: loadProc }), auto, count, h('span', { class: 'spacer' }), h('span', { class: 'info', text: t('Right-click a row to stop a process') })), gw);
     panes.proc.load = loadProc;
   }
 
   // ---- variables / status (filterable key-value grids)
-  const kvPane = (url, label) => {
+  const kvPane = (url, placeholder) => {
     const gw = h('div', { class: 'grid-wrap' });
-    const filter = h('input', { class: 'input sm', placeholder: `Cari ${label}…`, style: { width: '260px' } });
+    const filter = h('input', { class: 'input sm', placeholder, style: { width: '260px' } });
     let data = null;
     const render = () => {
       const q = filter.value.toLowerCase();
@@ -91,8 +92,8 @@ export function openServer() {
     pane.load = () => !data && load();
     return pane;
   };
-  panes.vars = kvPane(`/api/c/${a.conn.id}/server/variables`, 'variabel');
-  panes.status = kvPane(`/api/c/${a.conn.id}/server/status`, 'status');
+  panes.vars = kvPane(`/api/c/${a.conn.id}/server/variables`, t('Search variables…'));
+  panes.status = kvPane(`/api/c/${a.conn.id}/server/status`, t('Search status…'));
 
   // ---- users
   if (!sqlite) {
@@ -102,10 +103,10 @@ export function openServer() {
     let sel = null;
     const showGrants = async (u) => {
       sel = u;
-      grants.innerHTML = `<div class="faint">Memuat hak akses ${esc(u.user)}…</div>`;
+      grants.innerHTML = `<div class="faint">${t('Loading privileges for {user}…', { user: esc(u.user) })}</div>`;
       try {
         const r = await api('GET', `/api/c/${a.conn.id}/server/grants${qs({ user: u.user, host: u.host })}`);
-        grants.innerHTML = r.grants.length ? r.grants.map((g) => `<div>${esc(g)}</div>`).join('') : '<div class="faint">Tidak ada hak akses eksplisit.</div>';
+        grants.innerHTML = r.grants.length ? r.grants.map((g) => `<div>${esc(g)}</div>`).join('') : `<div class="faint">${t('No explicit privileges.')}</div>`;
       } catch (e) {
         grants.innerHTML = `<div class="error">${esc(e.message)}</div>`;
       }
@@ -122,11 +123,11 @@ export function openServer() {
             showGrants(u);
             showMenu(e, [
               { label: u.host ? `${u.user}@${u.host}` : u.user, header: true },
-              { label: 'Beri hak akses (GRANT)…', icon: 'shield-plus', action: () => grantDialog(u, 'grant') },
-              { label: 'Cabut hak akses (REVOKE)…', icon: 'shield-minus', action: () => grantDialog(u, 'revoke') },
-              { label: 'Ubah password…', icon: 'key-round', action: () => passwordDialog(u) },
+              { label: t('Grant privileges (GRANT)…'), icon: 'shield-plus', action: () => grantDialog(u, 'grant') },
+              { label: t('Revoke privileges (REVOKE)…'), icon: 'shield-minus', action: () => grantDialog(u, 'revoke') },
+              { label: t('Change password…'), icon: 'key-round', action: () => passwordDialog(u) },
               '-',
-              { label: 'Hapus user…', icon: 'user-x', danger: true, action: () => run('drop', u) },
+              { label: t('Delete user…'), icon: 'user-x', danger: true, action: () => run('drop', u) },
             ]);
           },
         });
@@ -138,46 +139,46 @@ export function openServer() {
     const rowUser = (r) => ({ user: users.rows[r][0], host: type === 'mysql' ? users.rows[r][1] : undefined });
     const run = async (action, payload) => {
       const { statements } = await api('POST', `/api/c/${a.conn.id}/sql/user`, { action, ...payload });
-      const ok = await sqlPreview({ title: { create: 'Buat user', drop: 'Hapus user', grant: 'Beri hak akses', revoke: 'Cabut hak akses', password: 'Ubah password' }[action], statements, connId: a.conn.id, type, danger: action === 'drop', confirmLabel: 'Jalankan' });
+      const ok = await sqlPreview({ title: { create: t('Create user'), drop: t('Delete user'), grant: t('Grant privileges'), revoke: t('Revoke privileges'), password: t('Change password') }[action], statements, connId: a.conn.id, type, danger: action === 'drop', confirmLabel: t('Run') });
       if (ok) {
-        toast('Selesai', 'ok');
+        toast(t('Done'), 'ok');
         loadUsers();
         if (sel) showGrants(sel);
       }
     };
     const createDialog = () => {
-      const user = h('input', { class: 'input mono', placeholder: 'nama_user' });
-      const host = h('input', { class: 'input mono', value: '%', placeholder: '% atau localhost' });
+      const user = h('input', { class: 'input mono', placeholder: t('user_name') });
+      const host = h('input', { class: 'input mono', value: '%', placeholder: t('% or localhost') });
       const pw = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
       modal({
-        title: 'User baru',
+        title: t('New user'),
         icon: 'user-plus',
-        body: h('div', { class: 'form-grid' }, field('Nama user', user), type === 'mysql' ? field('Host', host, '<span class="mono">%</span> = dari mana saja') : h('span'), h('div', { class: 'full' }, field('Password', pw))),
-        actions: ['spacer', { label: 'Batal' }, { label: 'Lanjut', kind: 'primary', onClick: () => (setTimeout(() => run('create', { user: user.value.trim(), host: host.value.trim(), password: pw.value }).catch((e) => toast(e.message, 'err'))), true) }],
+        body: h('div', { class: 'form-grid' }, field(t('User name'), user), type === 'mysql' ? field('Host', host, t('<span class="mono">%</span> = from anywhere')) : h('span'), h('div', { class: 'full' }, field(t('Password'), pw))),
+        actions: ['spacer', { label: t('Cancel') }, { label: t('Continue'), kind: 'primary', onClick: () => (setTimeout(() => run('create', { user: user.value.trim(), host: host.value.trim(), password: pw.value }).catch((e) => toast(e.message, 'err'))), true) }],
       });
     };
     const passwordDialog = (u) => {
       const pw = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
-      modal({ title: `Password untuk ${u.user}`, icon: 'key-round', body: field('Password baru', pw), actions: ['spacer', { label: 'Batal' }, { label: 'Lanjut', kind: 'primary', onClick: () => (setTimeout(() => run('password', { ...u, password: pw.value }).catch((e) => toast(e.message, 'err'))), true) }] });
+      modal({ title: t('Password for {user}', { user: u.user }), icon: 'key-round', body: field(t('New password'), pw), actions: ['spacer', { label: t('Cancel') }, { label: t('Continue'), kind: 'primary', onClick: () => (setTimeout(() => run('password', { ...u, password: pw.value }).catch((e) => toast(e.message, 'err'))), true) }] });
     };
     const grantDialog = (u, action) => {
       const privs = new Set(['SELECT']);
       const box = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' } });
       for (const p of type === 'mysql' ? MYSQL_PRIVS : PG_PRIVS) box.append(checkbox(p, privs.has(p), (v) => (v ? privs.add(p) : privs.delete(p))));
-      const nsSel = select(type === 'mysql' ? [{ value: '*', label: '*  (semua database)' }, ...state.active.namespaces.map((n) => ({ value: n, label: n }))] : state.active.namespaces.map((n) => ({ value: n, label: n })), state.active.ns);
+      const nsSel = select(type === 'mysql' ? [{ value: '*', label: t('*  (all databases)') }, ...state.active.namespaces.map((n) => ({ value: n, label: n }))] : state.active.namespaces.map((n) => ({ value: n, label: n })), state.active.ns);
       modal({
-        title: `${action === 'grant' ? 'GRANT ke' : 'REVOKE dari'} ${u.user}`,
+        title: action === 'grant' ? t('GRANT to {user}', { user: u.user }) : t('REVOKE from {user}', { user: u.user }),
         icon: action === 'grant' ? 'shield-plus' : 'shield-minus',
         size: 'wide',
-        body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } }, field(type === 'mysql' ? 'Database' : 'Schema (semua tabel di dalamnya)', nsSel), field('Hak akses', box)),
-        actions: ['spacer', { label: 'Batal' }, { label: 'Lanjut', kind: 'primary', onClick: () => (setTimeout(() => run(action, { ...u, ns: nsSel.value, privileges: [...privs] }).catch((e) => toast(e.message, 'err'))), true) }],
+        body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } }, field(type === 'mysql' ? t('Database') : t('Schema (all tables in it)'), nsSel), field(t('Privileges'), box)),
+        actions: ['spacer', { label: t('Cancel') }, { label: t('Continue'), kind: 'primary', onClick: () => (setTimeout(() => run(action, { ...u, ns: nsSel.value, privileges: [...privs] }).catch((e) => toast(e.message, 'err'))), true) }],
       });
     };
     panes.users = h(
       'div',
       { class: 'subpanel' },
-      h('div', { class: 'toolbar' }, h('button', { class: 'btn sm primary', html: icon('user-plus') + '<span>User baru</span>', onclick: createDialog }), h('button', { class: 'btn sm', html: icon('refresh-cw'), onclick: loadUsers }), h('span', { class: 'info', text: 'Klik nomor baris untuk melihat hak akses · klik kanan untuk aksi' })),
-      h('div', { style: { flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '12px', padding: '12px' } }, h('div', { style: { display: 'flex', minHeight: 0, border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' } }, gw), h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, gap: '8px' } }, h('div', { class: 'section-label', text: 'Hak akses (GRANT)' }), grants)),
+      h('div', { class: 'toolbar' }, h('button', { class: 'btn sm primary', html: icon('user-plus') + `<span>${t('New user')}</span>`, onclick: createDialog }), h('button', { class: 'btn sm', html: icon('refresh-cw'), onclick: loadUsers }), h('span', { class: 'info', text: t('Click a row number to see privileges · right-click for actions') })),
+      h('div', { style: { flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: '12px', padding: '12px' } }, h('div', { style: { display: 'flex', minHeight: 0, border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' } }, gw), h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, gap: '8px' } }, h('div', { class: 'section-label', text: t('Privileges (GRANT)') }), grants)),
     );
     panes.users.load = () => !users && loadUsers();
   }
@@ -189,7 +190,7 @@ export function openServer() {
     panes[k].load?.();
   };
   subtabs.querySelectorAll('.subtab').forEach((b) => (b.onclick = () => setSub(b.dataset.sub)));
-  const tab = { kind: 'server', icon: 'server', title: `Server: ${a.conn.name}`, panel, connId: a.conn.id, onClose: () => clearInterval(tab.timer) };
+  const tab = { kind: 'server', icon: 'server', title: t('Server: {name}', { name: a.conn.name }), panel, connId: a.conn.id, onClose: () => clearInterval(tab.timer) };
   addTab(tab);
   setSub(SUBS[0][0]);
 }

@@ -2,6 +2,7 @@
 import { h, icon, esc, api, qs, state, app, toast, watchJob, download, segmented, toggle, checkbox, select, field, fmtNum, fmtBytes, TYPE_LABEL } from './core.js';
 import { addTab, activateTab, findTab } from './tabs.js';
 import { renderGrid } from './grid.js';
+import { t, plural } from './i18n.js';
 
 // RFC 4180 CSV parser with delimiter auto-detection.
 export function parseCSV(text, delimiter = 'auto') {
@@ -46,7 +47,7 @@ export function parseCSV(text, delimiter = 'auto') {
 function dropzone(accept, label, onFile) {
   const input = h('input', { type: 'file', accept, hidden: true });
   const info = h('div', { class: 'faint', style: { fontSize: '12px' } });
-  const z = h('div', { class: 'dropzone', tabindex: 0 }, h('div', { html: icon('cloud-upload') }), h('div', { html: `<b>${label}</b> — seret ke sini atau klik untuk memilih` }), info, input);
+  const z = h('div', { class: 'dropzone', tabindex: 0 }, h('div', { html: icon('cloud-upload') }), h('div', { html: t('<b>{label}</b> — drag it here or click to choose', { label }) }), info, input);
   const take = (f) => {
     if (!f) return;
     z.classList.add('has-file');
@@ -81,7 +82,7 @@ function jobProgress() {
 
 export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
   const a = state.active;
-  if (!a) return toast('Hubungkan ke database dulu', 'err');
+  if (!a) return toast(t('Connect to a database first'), 'err');
   const prev = findTab((t) => t.kind === 'transfer' && t.connId === a.conn.id && t.ns === a.ns);
   if (prev) {
     activateTab(prev.id);
@@ -94,10 +95,10 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
   const panes = {};
   const seg = segmented(
     [
-      { value: 'export-sql', label: 'Export SQL', icon: 'file-down' },
-      { value: 'export-data', label: 'Export data', icon: 'sheet' },
-      { value: 'import-sql', label: 'Import SQL', icon: 'file-up' },
-      { value: 'import-csv', label: 'Import CSV', icon: 'table-properties' },
+      { value: 'export-sql', label: t('Export SQL'), icon: 'file-down' },
+      { value: 'export-data', label: t('Export data'), icon: 'sheet' },
+      { value: 'import-sql', label: t('Import SQL'), icon: 'file-up' },
+      { value: 'import-csv', label: t('Import CSV'), icon: 'table-properties' },
     ],
     which,
     (v) => show(v),
@@ -107,7 +108,7 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
     h(
       'div',
       { class: 'scroll-pad' },
-      h('div', { style: { maxWidth: '920px', margin: '0 auto 16px' } }, h('div', { style: { font: '700 22px var(--display)' }, text: 'Export & Import' }), h('div', { class: 'faint', html: `${TYPE_LABEL[type]} · ${esc(a.conn.name)}${type !== 'sqlite' ? ' / ' + esc(a.ns) : ''}` }), h('div', { style: { marginTop: '14px' } }, seg)),
+      h('div', { style: { maxWidth: '920px', margin: '0 auto 16px' } }, h('div', { style: { font: '700 22px var(--display)' }, text: t('Export & Import') }), h('div', { class: 'faint', html: `${TYPE_LABEL[type]} · ${esc(a.conn.name)}${type !== 'sqlite' ? ' / ' + esc(a.ns) : ''}` }), h('div', { style: { marginTop: '14px' } }, seg)),
       body,
     ),
   );
@@ -121,13 +122,13 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
       for (const [t, on] of picks) list.append(h('div', { class: 'chip', style: { height: '28px' } }, checkbox(t, on, (v) => picks.set(t, v))));
     };
     renderList();
-    const structure = toggle('Struktur (CREATE TABLE, index, relasi)', true);
-    const data = toggle('Data (INSERT)', true);
-    const drop = toggle('Sertakan DROP TABLE IF EXISTS', true);
-    const views = toggle('Sertakan view', true);
-    const dialect = select([{ value: '', label: `Sama (${TYPE_LABEL[type]})` }, { value: 'mysql', label: 'MySQL / MariaDB' }, { value: 'postgres', label: 'PostgreSQL' }, { value: 'sqlite', label: 'SQLite' }], '');
+    const structure = toggle(t('Structure (CREATE TABLE, indexes, relations)'), true);
+    const data = toggle(t('Data (INSERT)'), true);
+    const drop = toggle(t('Include DROP TABLE IF EXISTS'), true);
+    const views = toggle(t('Include views'), true);
+    const dialect = select([{ value: '', label: t('Same ({engine})', { engine: TYPE_LABEL[type] }) }, { value: 'mysql', label: 'MySQL / MariaDB' }, { value: 'postgres', label: 'PostgreSQL' }, { value: 'sqlite', label: 'SQLite' }], '');
     const prog = jobProgress();
-    const go = h('button', { class: 'btn primary', html: icon('file-down') + '<span>Buat file SQL</span>' });
+    const go = h('button', { class: 'btn primary', html: icon('file-down') + `<span>${t('Create SQL file')}</span>` });
     go.onclick = async () => {
       go.disabled = true;
       try {
@@ -135,9 +136,9 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
         const job = await api('POST', '/api/jobs/dump', { connId: a.conn.id, ns: a.ns, tables: chosen.length === picks.size ? null : chosen, structure: structure.input.checked, data: data.input.checked, dropTable: drop.input.checked, views: views.input.checked, dialect: dialect.value || null });
         const j = await watchJob(job, prog.update);
         if (j.status === 'done') {
-          toast(`${j.result.tables} tabel · ${fmtNum(j.result.rows)} baris`, 'ok', { title: 'Dump siap' });
+          toast(`${plural(j.result.tables, '{n} table', '{n} tables')} · ${plural(j.result.rows, '{n} row', '{n} rows')}`, 'ok', { title: t('Dump ready') });
           download(j.download);
-        } else toast(j.error, 'err', { title: 'Export gagal' });
+        } else toast(j.error, 'err', { title: t('Export failed') });
       } catch (e) {
         toast(e.message, 'err');
       } finally {
@@ -147,10 +148,10 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
     panes['export-sql'] = h(
       'div',
       { class: 'card' },
-      h('div', { class: 'card-title', html: icon('file-down') + 'Dump SQL' }),
-      h('div', { class: 'row', style: { marginBottom: '8px' } }, h('span', { class: 'section-label', text: 'Tabel' }), h('span', { class: 'spacer' }), h('button', { class: 'btn xs', text: 'Semua', onclick: () => (picks.forEach((_, k) => picks.set(k, true)), renderList()) }), h('button', { class: 'btn xs', text: 'Tidak ada', onclick: () => (picks.forEach((_, k) => picks.set(k, false)), renderList()) })),
+      h('div', { class: 'card-title', html: icon('file-down') + t('SQL dump') }),
+      h('div', { class: 'row', style: { marginBottom: '8px' } }, h('span', { class: 'section-label', text: t('Tables') }), h('span', { class: 'spacer' }), h('button', { class: 'btn xs', text: t('All'), onclick: () => (picks.forEach((_, k) => picks.set(k, true)), renderList()) }), h('button', { class: 'btn xs', text: t('None'), onclick: () => (picks.forEach((_, k) => picks.set(k, false)), renderList()) })),
       list,
-      h('div', { class: 'form-grid', style: { marginTop: '16px' } }, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } }, structure, data, drop, views), field('Dialek SQL hasil', dialect, 'Pilih engine lain untuk memindahkan database antar MySQL ↔ PostgreSQL ↔ SQLite.')),
+      h('div', { class: 'form-grid', style: { marginTop: '16px' } }, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } }, structure, data, drop, views), field(t('Output SQL dialect'), dialect, t('Pick another engine to move a database between MySQL ↔ PostgreSQL ↔ SQLite.'))),
       h('div', { class: 'row', style: { marginTop: '16px' } }, h('span', { class: 'spacer' }), go),
       prog,
     );
@@ -160,11 +161,11 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
   {
     const tSel = select(tables(), table || tables()[0]);
     let format = 'csv';
-    const delim = select([{ value: ',', label: 'Koma ( , )' }, { value: ';', label: 'Titik koma ( ; ) — Excel Indonesia' }, { value: '\t', label: 'Tab' }], ',');
-    const delimField = field('Pemisah', delim);
-    const fmt = segmented([{ value: 'csv', label: 'CSV', icon: 'file-spreadsheet' }, { value: 'json', label: 'JSON', icon: 'braces' }, { value: 'sql', label: 'SQL INSERT', icon: 'file-code-2' }], 'csv', (v) => ((format = v), (delimField.hidden = v !== 'csv')));
+    const delim = select([{ value: ',', label: t('Comma ( , )') }, { value: ';', label: t('Semicolon ( ; ) — Excel (Indonesian locale)') }, { value: '\t', label: t('Tab') }], ',');
+    const delimField = field(t('Delimiter'), delim);
+    const fmt = segmented([{ value: 'xlsx', label: 'Excel', icon: 'sheet' }, { value: 'csv', label: 'CSV', icon: 'file-spreadsheet' }, { value: 'json', label: 'JSON', icon: 'braces' }, { value: 'sql', label: 'SQL INSERT', icon: 'file-code-2' }], 'csv', (v) => ((format = v), (delimField.hidden = v !== 'csv')));
     const prog = jobProgress();
-    const go = h('button', { class: 'btn primary', html: icon('download') + '<span>Export</span>' });
+    const go = h('button', { class: 'btn primary', html: icon('download') + `<span>${t('Export')}</span>` });
     go.onclick = async () => {
       go.disabled = true;
       try {
@@ -174,27 +175,27 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
             : await api('POST', '/api/jobs/export-table', { connId: a.conn.id, ns: a.ns, table: tSel.value, format, delimiter: delim.value });
         const j = await watchJob(job, prog.update);
         if (j.status === 'done') {
-          toast(`${fmtNum(j.result.rows)} baris`, 'ok', { title: 'Export selesai' });
+          toast(plural(j.result.rows, '{n} row', '{n} rows'), 'ok', { title: t('Export complete') });
           download(j.download);
-        } else toast(j.error, 'err', { title: 'Export gagal' });
+        } else toast(j.error, 'err', { title: t('Export failed') });
       } catch (e) {
         toast(e.message, 'err');
       } finally {
         go.disabled = false;
       }
     };
-    panes['export-data'] = h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('sheet') + 'Export seluruh isi tabel' }), h('div', { class: 'form-grid' }, field('Tabel', tSel), field('Format', fmt), delimField), h('div', { class: 'row', style: { marginTop: '16px' } }, h('span', { class: 'spacer' }), go), prog);
+    panes['export-data'] = h('div', { class: 'card' }, h('div', { class: 'card-title', html: icon('sheet') + t('Export an entire table') }), h('div', { class: 'form-grid' }, field(t('Table'), tSel), field(t('Format'), fmt), delimField), h('div', { class: 'row', style: { marginTop: '16px' } }, h('span', { class: 'spacer' }), go), prog);
     panes['export-data'].setTable = (t) => t && (tSel.value = t);
   }
 
   // ---- import SQL
   {
     let file = null;
-    const cont = toggle('Lanjutkan walau ada statement yang gagal', false);
+    const cont = toggle(t('Continue when a statement fails'), false);
     const prog = jobProgress();
     const errors = h('div');
-    const go = h('button', { class: 'btn primary', html: icon('file-up') + '<span>Jalankan import</span>', disabled: true });
-    const dz = dropzone('.sql,.txt', 'File .sql', (f) => {
+    const go = h('button', { class: 'btn primary', html: icon('file-up') + `<span>${t('Run import')}</span>`, disabled: true });
+    const dz = dropzone('.sql,.txt', t('.sql file'), (f) => {
       file = f;
       go.disabled = false;
     });
@@ -207,8 +208,8 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
         const job = await api('POST', `/api/jobs/import-sql${qs({ connId: a.conn.id, ns: type === 'sqlite' ? '' : a.ns, continueOnError: cont.input.checked ? '1' : '' })}`, text, { text: true });
         const j = await watchJob(job, prog.update);
         const errs = j.result?.errors || [];
-        if (j.status === 'done') toast(`${fmtNum(j.result.ok)} dari ${fmtNum(j.result.statements)} statement berhasil`, errs.length ? 'info' : 'ok', { title: 'Import selesai' });
-        else toast(j.error, 'err', { title: 'Import berhenti' });
+        if (j.status === 'done') toast(t('{ok} of {total} statements succeeded', { ok: fmtNum(j.result.ok), total: fmtNum(j.result.statements) }), errs.length ? 'info' : 'ok', { title: t('Import complete') });
+        else toast(j.error, 'err', { title: t('Import stopped') });
         if (errs.length) errors.append(h('div', { class: 'log', style: { marginTop: '12px' }, html: errs.slice(0, 100).map((e) => `<div class="error">#${e.index}: ${esc(e.error)}</div><div class="t">${esc(e.sql)}</div>`).join('') }));
         app.refreshNamespaces();
         app.loadTree();
@@ -221,8 +222,8 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
     panes['import-sql'] = h(
       'div',
       { class: 'card' },
-      h('div', { class: 'card-title', html: icon('file-up') + 'Import file SQL' }),
-      h('div', { class: 'notice info', style: { marginBottom: '14px' }, html: `${icon('info')}<div>Dijalankan ke <b>${esc(a.conn.name)}${type !== 'sqlite' ? ' / ' + esc(a.ns) : ''}</b>, statement demi statement. Mendukung <span class="mono">DELIMITER</span> (MySQL), blok <span class="mono">$$</span> (PostgreSQL) dan trigger SQLite.</div>` }),
+      h('div', { class: 'card-title', html: icon('file-up') + t('Import an SQL file') }),
+      h('div', { class: 'notice info', style: { marginBottom: '14px' }, html: `${icon('info')}<div>${t('Runs against <b>{target}</b>, one statement at a time. Supports <span class="mono">DELIMITER</span> (MySQL), <span class="mono">$$</span> blocks (PostgreSQL) and SQLite triggers.', { target: `${esc(a.conn.name)}${type !== 'sqlite' ? ' / ' + esc(a.ns) : ''}` })}</div>` }),
       dz,
       h('div', { class: 'row', style: { marginTop: '14px' } }, cont, h('span', { class: 'spacer' }), go),
       prog,
@@ -233,17 +234,17 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
   // ---- import CSV
   {
     const tSel = select(tables(), table || tables()[0]);
-    const header = toggle('Baris pertama adalah nama kolom', true, () => reparse());
-    const emptyNull = toggle('Sel kosong → NULL', true);
-    const delim = select([{ value: 'auto', label: 'Deteksi otomatis' }, { value: ',', label: 'Koma' }, { value: ';', label: 'Titik koma' }, { value: '\t', label: 'Tab' }, { value: '|', label: 'Pipa |' }], 'auto');
+    const header = toggle(t('First row contains column names'), true, () => reparse());
+    const emptyNull = toggle(t('Empty cells → NULL'), true);
+    const delim = select([{ value: 'auto', label: t('Auto-detect') }, { value: ',', label: t('Comma') }, { value: ';', label: t('Semicolon') }, { value: '\t', label: t('Tab') }, { value: '|', label: t('Pipe |') }], 'auto');
     const mapBox = h('div');
     const previewBox = h('div', { class: 'grid-wrap', style: { maxHeight: '240px', border: '1px solid var(--line)', borderRadius: '10px' } });
     const prog = jobProgress();
-    const go = h('button', { class: 'btn primary', html: icon('table-properties') + '<span>Import ke tabel</span>', disabled: true });
+    const go = h('button', { class: 'btn primary', html: icon('table-properties') + `<span>${t('Import into table')}</span>`, disabled: true });
     let text = '';
     let parsed = null;
     let mapping = [];
-    const dz = dropzone('.csv,.tsv,.txt', 'File CSV', async (f) => {
+    const dz = dropzone('.csv,.tsv,.txt', t('CSV file'), async (f) => {
       text = await f.text();
       reparse();
     });
@@ -253,18 +254,18 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
       if (!text) return;
       parsed = parseCSV(text, delim.value);
       const cols = state.columns[tSel.value] || [];
-      const head = header.input.checked ? parsed.rows[0] : parsed.rows[0].map((_, i) => `kolom ${i + 1}`);
+      const head = header.input.checked ? parsed.rows[0] : parsed.rows[0].map((_, i) => t('column {n}', { n: i + 1 }));
       const dataRows = header.input.checked ? parsed.rows.slice(1) : parsed.rows;
       mapping = head.map((hd) => cols.find((c) => c.toLowerCase() === String(hd).trim().toLowerCase()) || '');
       mapBox.innerHTML = '';
       const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '8px' } });
       head.forEach((hd, i) => {
-        const s = select([{ value: '', label: '— lewati —' }, ...cols.map((c) => ({ value: c, label: c }))], mapping[i]);
+        const s = select([{ value: '', label: t('— skip —') }, ...cols.map((c) => ({ value: c, label: c }))], mapping[i]);
         s.classList.add('sm');
         s.onchange = () => (mapping[i] = s.value);
         grid.append(h('div', { class: 'field' }, h('label', { class: 'mono', text: `${hd}  →` }), s));
       });
-      mapBox.append(h('div', { class: 'section-label', style: { margin: '14px 0 8px' }, text: `Pemetaan kolom · ${fmtNum(dataRows.length)} baris · pemisah "${parsed.delimiter === '\t' ? 'tab' : parsed.delimiter}"` }), grid);
+      mapBox.append(h('div', { class: 'section-label', style: { margin: '14px 0 8px' }, text: t('Column mapping · {rows} · delimiter "{delimiter}"', { rows: plural(dataRows.length, '{n} row', '{n} rows'), delimiter: parsed.delimiter === '\t' ? t('tab') : parsed.delimiter }) }), grid);
       renderGrid(previewBox, { columns: head, rows: dataRows.slice(0, 50), animate: true });
       go.disabled = !dataRows.length;
     }
@@ -272,7 +273,7 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
       const head = header.input.checked ? parsed.rows[0] : parsed.rows[0];
       const dataRows = header.input.checked ? parsed.rows.slice(1) : parsed.rows;
       const idx = mapping.map((m, i) => (m ? i : -1)).filter((i) => i >= 0);
-      if (!idx.length) return toast('Petakan minimal satu kolom', 'err');
+      if (!idx.length) return toast(t('Map at least one column'), 'err');
       const columns = idx.map((i) => mapping[i]);
       void head;
       go.disabled = true;
@@ -282,13 +283,13 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
           const chunk = dataRows.slice(i, i + 1000).map((r) => idx.map((k) => (emptyNull.input.checked && (r[k] === undefined || r[k] === '') ? null : (r[k] ?? null))));
           await api('POST', `/api/c/${a.conn.id}/bulk-insert`, { ns: a.ns, table: tSel.value, columns, rows: chunk });
           done += chunk.length;
-          prog.update({ progress: done / dataRows.length, phase: `${fmtNum(done)} / ${fmtNum(dataRows.length)} baris`, status: done === dataRows.length ? 'done' : 'running' });
+          prog.update({ progress: done / dataRows.length, phase: t('{done} / {total} rows', { done: fmtNum(done), total: fmtNum(dataRows.length) }), status: done === dataRows.length ? 'done' : 'running' });
         }
-        toast(`${fmtNum(done)} baris masuk ke ${tSel.value}`, 'ok', { title: 'Import CSV selesai' });
+        toast(plural(done, '{n} row inserted into {table}', '{n} rows inserted into {table}', { table: tSel.value }), 'ok', { title: t('CSV import complete') });
         app.loadTree();
       } catch (e) {
-        prog.update({ progress: done / dataRows.length, phase: `Berhenti setelah ${fmtNum(done)} baris: ${e.message}`, status: 'error' });
-        toast(e.message, 'err', { title: `Import berhenti di baris ~${fmtNum(done + 1)}` });
+        prog.update({ progress: done / dataRows.length, phase: plural(done, 'Stopped after {n} row: {error}', 'Stopped after {n} rows: {error}', { error: e.message }), status: 'error' });
+        toast(e.message, 'err', { title: t('Import stopped at row ~{n}', { n: fmtNum(done + 1) }) });
       } finally {
         go.disabled = false;
       }
@@ -296,12 +297,12 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
     panes['import-csv'] = h(
       'div',
       { class: 'card' },
-      h('div', { class: 'card-title', html: icon('table-properties') + 'Import CSV ke tabel' }),
-      h('div', { class: 'form-grid', style: { marginBottom: '14px' } }, field('Tabel tujuan', tSel), field('Pemisah', delim), h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } }, header, emptyNull)),
+      h('div', { class: 'card-title', html: icon('table-properties') + t('Import CSV into a table') }),
+      h('div', { class: 'form-grid', style: { marginBottom: '14px' } }, field(t('Target table'), tSel), field(t('Delimiter'), delim), h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } }, header, emptyNull)),
       dz,
       mapBox,
       h('div', { style: { marginTop: '12px' } }, previewBox),
-      h('div', { class: 'notice info', style: { marginTop: '12px' }, html: `${icon('shield-check')}<div>Setiap 1.000 baris dimasukkan dalam satu transaksi.</div>` }),
+      h('div', { class: 'notice info', style: { marginTop: '12px' }, html: `${icon('shield-check')}<div>${t('Every 1,000 rows are inserted in a single transaction.')}</div>` }),
       h('div', { class: 'row', style: { marginTop: '14px' } }, h('span', { class: 'spacer' }), go),
       prog,
     );
@@ -316,7 +317,7 @@ export function openTransfer({ tab: which = 'export-sql', table = null } = {}) {
     p.setTable?.(t);
     if (seg.value !== v) seg.set(v);
   }
-  const tab = { kind: 'transfer', icon: 'arrow-down-up', title: 'Export / Import', panel, connId: a.conn.id, ns: a.ns, show: (v, t) => show(v, t) };
+  const tab = { kind: 'transfer', icon: 'arrow-down-up', title: t('Export / Import'), panel, connId: a.conn.id, ns: a.ns, show: (v, t) => show(v, t) };
   addTab(tab);
   show(which, table);
 }

@@ -1,5 +1,6 @@
 // Visual effects: pointer spotlight, ripples, parallax background, count-up, circular theme reveal.
-import { $, local } from './core.js';
+import { $, local, api } from './core.js';
+import { LOCALE } from './i18n.js';
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 export const motionOK = () => !reduced.matches;
@@ -60,14 +61,14 @@ export function countUp(el, to, ms = 700) {
   const from = Number(el.dataset.v || 0);
   el.dataset.v = to;
   if (!motionOK() || from === to) {
-    el.textContent = Number(to).toLocaleString('id-ID');
+    el.textContent = Number(to).toLocaleString(LOCALE);
     return;
   }
   const t0 = performance.now();
   const step = (t) => {
     const k = Math.min(1, (t - t0) / ms);
     const e = 1 - Math.pow(1 - k, 4);
-    el.textContent = Math.round(from + (to - from) * e).toLocaleString('id-ID');
+    el.textContent = Math.round(from + (to - from) * e).toLocaleString(LOCALE);
     if (k < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -85,6 +86,8 @@ export function applyTheme(t) {
 export function switchTheme(originEl) {
   const next = currentTheme() === 'light' ? 'dark' : 'light';
   local.set('dbs-theme', next);
+  // Also kept server-side: the desktop app gets a new origin (port) per launch, which empties localStorage.
+  api('POST', '/api/settings', { theme: next }).catch(() => {});
   if (!document.startViewTransition || !motionOK()) return applyTheme(next);
   const r = originEl?.getBoundingClientRect();
   const x = r ? r.left + r.width / 2 : innerWidth / 2;
@@ -98,7 +101,8 @@ export function switchTheme(originEl) {
     );
   });
 }
-applyTheme(local.get('dbs-theme', null));
+// The server stamps the saved theme on <html>; fall back to this browser's own choice.
+applyTheme(document.documentElement.dataset.theme || local.get('dbs-theme', null));
 
 // Stagger children entrance by setting --i.
 export function stagger(container) {

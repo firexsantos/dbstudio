@@ -2,18 +2,19 @@
 import { $, h, icon, esc, state, app, local, TYPE_LABEL } from './core.js';
 import { switchTheme } from './fx.js';
 import { connSub } from './conn.js';
+import { t } from './i18n.js';
 
 function score(text, q) {
   if (!q) return { s: 1, marks: [] };
-  const t = text.toLowerCase();
-  const direct = t.indexOf(q);
-  if (direct >= 0) return { s: 1000 - direct - t.length * 0.1, marks: [...Array(q.length).keys()].map((k) => direct + k) };
+  const low = text.toLowerCase();
+  const direct = low.indexOf(q);
+  if (direct >= 0) return { s: 1000 - direct - low.length * 0.1, marks: [...Array(q.length).keys()].map((k) => direct + k) };
   let i = 0;
   let s = 0;
   let last = -2;
   const marks = [];
   for (const ch of q) {
-    const j = t.indexOf(ch, i);
+    const j = low.indexOf(ch, i);
     if (j < 0) return null;
     s += j === last + 1 ? 6 : 1;
     marks.push(j);
@@ -27,35 +28,48 @@ function highlight(text, marks) {
   return [...text].map((c, i) => (set.has(i) ? `<mark>${esc(c)}</mark>` : esc(c))).join('');
 }
 
+// `kw` holds search words in both languages, so a command is found by its English or Indonesian name
+// whichever language the interface is in.
 function items() {
   const a = state.active;
+  const act = t('Actions');
   const list = [
-    { group: 'Aksi', title: 'Koneksi baru', icon: 'plug-zap', run: () => app.openConnDialog() },
-    { group: 'Aksi', title: 'Query baru', sub: 'Ctrl+Enter untuk menjalankan', icon: 'square-terminal', run: () => app.newQueryTab() },
-    a && { group: 'Aksi', title: 'Tabel baru', sub: 'Table designer', icon: 'table-properties', run: () => app.openDesigner(null) },
-    a && { group: 'Aksi', title: 'Lihat ERD', sub: 'Diagram relasi tabel', icon: 'workflow', run: () => app.openTool('erd') },
-    { group: 'Aksi', title: 'Salin tabel ke database / server lain', icon: 'copy-plus', run: () => app.openTool('copy') },
-    a && { group: 'Aksi', title: 'Export / Import', sub: 'SQL dump, CSV, JSON', icon: 'arrow-down-up', run: () => app.openTool('transfer') },
-    { group: 'Aksi', title: 'Bandingkan skema', sub: 'Schema compare & sync', icon: 'git-compare', run: () => app.openTool('compare') },
-    a && { group: 'Aksi', title: 'Info server', sub: 'Proses, variabel, status, pengguna', icon: 'server', run: () => app.openTool('server') },
-    a && a.conn.type !== 'sqlite' && { group: 'Aksi', title: `${a.conn.type === 'postgres' ? 'Schema' : 'Database'} baru`, icon: 'folder-plus', run: () => app.createNamespace() },
-    { group: 'Aksi', title: 'Ganti tema terang / gelap', icon: 'sun-moon', run: () => switchTheme($('#btn-theme')) },
-    { group: 'Aksi', title: 'Buka database demo', icon: 'sparkles', run: () => app.openDemo() },
-    { group: 'Aksi', title: 'Tentang DBStudio & pengembang', sub: 'Firman Santosa', icon: 'info', run: () => app.openAbout() },
-    a && { group: 'Aksi', title: 'Putuskan koneksi', icon: 'unplug', run: () => app.disconnect() },
-    ...state.conns.map((c) => ({ group: 'Koneksi', title: c.name, sub: `${TYPE_LABEL[c.type]} · ${connSub(c)}`, icon: 'database', run: () => app.connect(c.id) })),
-    ...(a ? state.tables.map((t) => ({ group: t.kind === 'view' ? 'View' : 'Tabel', title: t.name, sub: `${a.ns} · Enter buka data`, icon: t.kind === 'view' ? 'eye' : 'table-2', run: () => app.openTableTab(t.name) })) : []),
+    { group: act, title: t('New connection'), icon: 'plug-zap', kw: 'new connection koneksi baru', run: () => app.openConnDialog() },
+    { group: act, title: t('New query'), sub: t('Ctrl+Enter to run'), icon: 'square-terminal', kw: 'new query baru sql editor', run: () => app.newQueryTab() },
+    a && { group: act, title: t('New table'), sub: 'Table designer', icon: 'table-properties', kw: 'new table tabel baru create buat', run: () => app.openDesigner(null) },
+    a && { group: act, title: t('View ERD'), sub: t('Table relation diagram'), icon: 'workflow', kw: 'erd diagram relation relasi lihat', run: () => app.openTool('erd') },
+    { group: act, title: t('Copy table to another database / server'), icon: 'copy-plus', kw: 'copy table salin tabel database server lain', run: () => app.openTool('copy') },
+    { group: act, title: t('Data sync'), sub: t('Compare & match table contents'), icon: 'arrow-left-right', kw: 'data sync sinkronisasi bandingkan samakan', run: () => app.openTool('datasync') },
+    a && { group: act, title: t('Query Builder'), sub: t('Build queries visually'), icon: 'blocks', kw: 'query builder visual susun', run: () => app.openTool('qb') },
+    a && { group: act, title: t('Test data generator'), icon: 'wand-sparkles', kw: 'test data generator generate data uji isi', run: () => app.openTool('datagen') },
+    a && { group: act, title: t('Search database'), sub: t('Find values across all tables'), icon: 'search-code', kw: 'search find database cari temukan nilai', run: () => app.openTool('finder') },
+    a && { group: act, title: t('Data dictionary'), sub: t('HTML / Markdown document'), icon: 'book-open-text', kw: 'data dictionary dokumen document kamus', run: () => app.openTool('dictionary') },
+    a && { group: act, title: t('Backup & restore'), icon: 'archive-restore', kw: 'backup restore cadangan pulihkan', run: () => app.openTool('backup') },
+    { group: act, title: t('Import connections'), sub: 'DBStudio, Navicat .ncx, DBeaver', icon: 'download', kw: 'import connections koneksi', run: () => app.openImportDialog() },
+    { group: act, title: t('Export connections'), sub: t('Can be encrypted with a passphrase'), icon: 'upload', kw: 'export connections koneksi enkripsi encrypt', run: () => app.openExportDialog() },
+    { group: act, title: t("What's new"), icon: 'gift', kw: "what's new apa yang baru changelog rilis release", run: () => app.openWhatsNew() },
+    { group: act, title: t('Settings'), sub: 'Ctrl+,', icon: 'settings', kw: 'settings pengaturan preferences preferensi language bahasa theme tema data folder', run: () => app.openSettings() },
+    a && { group: act, title: t('Export / Import'), sub: t('SQL dump, CSV, JSON'), icon: 'arrow-down-up', kw: 'export import ekspor impor dump csv json', run: () => app.openTool('transfer') },
+    { group: act, title: t('Schema compare'), sub: 'Schema compare & sync', icon: 'git-compare', kw: 'schema compare sync bandingkan skema sinkronkan', run: () => app.openTool('compare') },
+    a && { group: act, title: t('Server info'), sub: t('Processes, variables, status, users'), icon: 'server', kw: 'server info proses process variabel variables pengguna users', run: () => app.openTool('server') },
+    a && a.conn.type !== 'sqlite' && { group: act, title: a.conn.type === 'postgres' ? t('New schema') : t('New database'), icon: 'folder-plus', kw: 'new schema database baru create buat', run: () => app.createNamespace() },
+    { group: act, title: t('Toggle light / dark theme'), icon: 'sun-moon', kw: 'theme light dark ganti tema terang gelap', run: () => switchTheme($('#btn-theme')) },
+    { group: act, title: t('Open demo database'), icon: 'sparkles', kw: 'open demo database buka', run: () => app.openDemo() },
+    { group: act, title: t('About DBStudio & the developer'), sub: 'Firman Santosa', icon: 'info', kw: 'about tentang developer pengembang', run: () => app.openAbout() },
+    a && { group: act, title: t('Disconnect'), icon: 'unplug', kw: 'disconnect putuskan koneksi', run: () => app.disconnect() },
+    ...state.conns.map((c) => ({ group: t('Connections'), title: c.name, sub: `${TYPE_LABEL[c.type]} · ${connSub(c)}`, icon: 'database', kw: 'connection koneksi', run: () => app.connect(c.id) })),
+    ...(a ? state.tables.map((tb) => ({ group: tb.kind === 'view' ? t('View') : t('Table'), title: tb.name, sub: t('{ns} · Enter to open data', { ns: a.ns }), icon: tb.kind === 'view' ? 'eye' : 'table-2', run: () => app.openTableTab(tb.name) })) : []),
     ...local
       .get('dbs-history', [])
       .slice(0, 12)
-      .map((x) => ({ group: 'Riwayat', title: x.sql.replace(/\s+/g, ' ').slice(0, 90), sub: x.conn, icon: 'history', run: () => app.newQueryTab(x.sql) })),
+      .map((x) => ({ group: t('History'), title: x.sql.replace(/\s+/g, ' ').slice(0, 90), sub: x.conn, icon: 'history', run: () => app.newQueryTab(x.sql) })),
   ];
   return list.filter(Boolean);
 }
 
 export function openPalette() {
   if ($('.palette-back')) return;
-  const input = h('input', { placeholder: 'Ketik perintah, tabel, atau koneksi…', spellcheck: 'false' });
+  const input = h('input', { placeholder: t('Type a command, table or connection…'), spellcheck: 'false' });
   const list = h('div', { class: 'p-list' });
   const hl = h('div', { class: 'p-hl' });
   const pal = h(
@@ -63,7 +77,7 @@ export function openPalette() {
     { class: 'palette glass' },
     h('div', { class: 'p-input', html: icon('command') }, input, h('kbd', { text: 'Esc' })),
     list,
-    h('div', { class: 'p-foot', html: '<span><kbd>↑</kbd> <kbd>↓</kbd> pilih</span><span><kbd>Enter</kbd> jalankan</span><span><kbd>Ctrl</kbd> + <kbd>K</kbd> buka/tutup</span>' }),
+    h('div', { class: 'p-foot', html: `<span><kbd>↑</kbd> <kbd>↓</kbd> ${t('select')}</span><span><kbd>Enter</kbd> ${t('run')}</span><span><kbd>Ctrl</kbd> + <kbd>K</kbd> ${t('open/close')}</span>` }),
   );
   const back = h('div', { class: 'palette-back' }, pal);
   let results = [];
@@ -76,7 +90,7 @@ export function openPalette() {
   const render = () => {
     const q = input.value.trim().toLowerCase();
     results = all
-      .map((it) => ({ it, m: score(`${it.title} ${it.sub || ''}`, q) }))
+      .map((it) => ({ it, m: score(`${it.title} ${it.sub || ''} ${it.kw || ''}`, q) }))
       .filter((x) => x.m)
       .sort((x, y) => y.m.s - x.m.s)
       .slice(0, 40);
@@ -95,7 +109,7 @@ export function openPalette() {
       el.onclick = () => runSel(i);
       list.append(el);
     });
-    if (!results.length) list.append(h('div', { class: 'empty', text: 'Tidak ada yang cocok' }));
+    if (!results.length) list.append(h('div', { class: 'empty', text: t('No matches') }));
     requestAnimationFrame(() => select(0, true));
   };
   const select = (i, instant = false) => {

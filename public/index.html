@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -17,34 +17,38 @@
 
 <div id="app" class="intro">
   <nav id="rail" class="glass">
-    <div class="rail-logo" title="Palet perintah (Ctrl+K)"></div>
+    <div class="rail-logo" title="Command palette (Ctrl+K)"></div>
     <div class="rail-items">
       <div class="rail-indicator"></div>
-      <button class="rail-btn" data-panel="connections" title="Koneksi"></button>
+      <button class="rail-btn" data-panel="connections" title="Connections"></button>
       <button class="rail-btn" data-panel="explorer" title="Explorer"></button>
-      <button class="rail-btn" data-panel="jobs" title="Pekerjaan (copy / export / import)"><span class="badge-dot" hidden>0</span></button>
+      <button class="rail-btn" data-panel="tools" title="Tools — every feature"></button>
+      <button class="rail-btn" data-panel="jobs" title="Background jobs"><span class="badge-dot" hidden>0</span></button>
       <span class="rail-sep"></span>
-      <button class="rail-btn" data-tool="erd" title="ERD — diagram relasi"></button>
-      <button class="rail-btn" data-tool="copy" title="Salin tabel ke DB / server lain"></button>
-      <button class="rail-btn" data-tool="transfer" title="Export / Import"></button>
-      <button class="rail-btn" data-tool="compare" title="Bandingkan & sinkronkan skema"></button>
-      <button class="rail-btn" data-tool="server" title="Info server"></button>
+      <button class="rail-btn" data-tool="qb" title="Visual Query Builder"></button>
+      <button class="rail-btn" data-tool="erd" title="ERD — relation diagram"></button>
+      <button class="rail-btn" data-tool="datasync" title="Data sync"></button>
     </div>
     <div class="rail-bottom">
-      <button class="rail-btn" id="btn-about" title="Tentang DBStudio & pengembang"></button>
-      <button class="rail-btn" id="btn-palette" title="Palet perintah (Ctrl+K)"></button>
-      <button class="rail-btn" id="btn-theme" title="Ganti tema"></button>
+      <button class="rail-btn" id="btn-settings" title="Settings (Ctrl+,)"></button>
+      <button class="rail-btn" id="btn-about" title="About DBStudio & the developer"></button>
+      <button class="rail-btn" id="btn-palette" title="Command palette (Ctrl+K)"></button>
+      <button class="rail-btn" id="btn-theme" title="Toggle theme"></button>
     </div>
   </nav>
 
   <aside id="sidebar" class="glass">
     <div class="side-panel" data-panel="connections" hidden>
-      <div class="side-head"><div class="side-title">Koneksi</div><button class="btn sm primary" id="btn-new-conn"></button></div>
+      <div class="side-head"><div class="side-title">Connections</div><button class="btn sm primary" id="btn-new-conn"></button></div>
       <div class="side-scroll" id="conn-list"></div>
     </div>
     <div class="side-panel" data-panel="explorer" hidden><div id="explorer" class="side-panel-inner"></div></div>
+    <div class="side-panel" data-panel="tools" hidden>
+      <div class="side-head"><div class="side-title">Tools</div></div>
+      <div class="side-scroll" id="tool-list"></div>
+    </div>
     <div class="side-panel" data-panel="jobs" hidden>
-      <div class="side-head"><div class="side-title">Pekerjaan</div><button class="btn ghost xs icon" id="btn-refresh-jobs" title="Muat ulang"></button></div>
+      <div class="side-head"><div class="side-title">Jobs</div><button class="btn ghost xs icon" id="btn-refresh-jobs" title="Refresh"></button></div>
       <div class="side-scroll" id="job-list"></div>
     </div>
   </aside>
@@ -53,12 +57,12 @@
     <header id="tabbar">
       <div id="tabs"></div>
       <div id="tab-indicator"></div>
-      <div class="tab-actions"><button class="btn sm ghost" id="btn-new-query" title="Query baru (Alt+N)"></button></div>
+      <div class="tab-actions"><button class="btn sm ghost" id="btn-new-query" title="New query (Alt+N)"></button></div>
     </header>
     <section id="tab-content"><div id="welcome" class="welcome"></div></section>
     <footer id="statusbar"></footer>
   </main>
-  <div id="resizer" title="Seret untuk mengubah lebar"></div>
+  <div id="resizer" title="Drag to resize"></div>
 </div>
 
 <div id="toasts"></div>

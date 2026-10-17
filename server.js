@@ -4,6 +4,7 @@ import express from 'express';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { platform, release } from 'node:os';
 import { createRequire } from 'node:module';
 import { gzipSync } from 'node:zlib';
@@ -14,6 +15,15 @@ import * as schema from './lib/schema.js';
 import * as jobs from './lib/jobs.js';
 import { runCopy } from './lib/copy.js';
 import { runDump, runTableExport, runImport } from './lib/transfer.js';
+import * as connio from './lib/connio.js';
+import { runCompare as runDataCompare, runApply as runDataApply, runScript as runDataScript } from './lib/datasync.js';
+import { planTable, runGenerate, sampleValues, generatorList } from './lib/datagen.js';
+import { runFind } from './lib/finder.js';
+import { buildDictionary } from './lib/dictionary.js';
+import { listBackups, runBackup, runRestore, deleteBackup, exportBackup } from './lib/backup.js';
+import { buildXlsx } from './lib/xlsx.js';
+import * as settings from './lib/settings.js';
+import { t, plural } from './lib/i18n.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -47,7 +57,15 @@ app.use((req, res, next) => {
 });
 
 // ---------- static assets ----------
-app.use(express.static(join(ROOT, 'public')));
+// The page is stamped with the saved language/theme so the UI renders in the right one from the first frame.
+const INDEX_FILE = join(ROOT, 'public', 'index.html');
+const sendIndex = (_req, res) => {
+  const s = settings.get();
+  const html = readFileSync(INDEX_FILE, 'utf8').replace(/<html lang="[^"]*">/, `<html lang="${s.language}"${s.theme ? ` data-theme="${s.theme}"` : ''}>`);
+  res.set('Cache-Control', 'no-store').type('html').send(html);
+};
+app.get(['/', '/index.html'], sendIndex);
+app.use(express.static(join(ROOT, 'public'), { index: false }));
 app.use('/vendor/codemirror', express.static(join(ROOT, 'node_modules', 'codemirror')));
 for (const [route, pkg] of [
   ['inter', '@fontsource-variable/inter'],
@@ -93,7 +111,7 @@ const route = (fn) => async (req, res) => {
 
 function connOr404(id) {
   const conn = store.get(id);
-  if (!conn) throw Object.assign(new Error('Connection not found'), { code: 'NOT_FOUND' });
+  if (!conn) throw Object.assign(new Error(t('Connection not found')), { code: 'NOT_FOUND' });
   return conn;
 }
 const C = (req) => connOr404(req.params.id);
@@ -143,6 +161,7 @@ app.post(
   route(async (req) => {
     const conn = C(req);
     const namespaces = await db.listNamespaces(conn);
+    store.patch(conn.id, { lastUsed: Date.now() });
     const info = await db.serverInfo(conn).catch(() => ({ version: null, flavor: conn.type }));
     const defaultNs = conn.type === 'postgres' ? (namespaces.includes('public') ? 'public' : namespaces[0]) : conn.database || namespaces[0];
     return { namespaces, label: db.NAMESPACE_LABEL[conn.type], defaultNs, version: info.version, flavor: info.flavor };
@@ -158,10 +177,14 @@ app.get(
   '/api/meta',
   route(() => ({
     version: PKG.version,
-    runtime: process.versions.electron ? `Aplikasi desktop (Electron ${process.versions.electron})` : `Node.js ${process.versions.node}`,
+    runtime: process.versions.electron ? t('Desktop app (Electron {version})', { version: process.versions.electron }) : `Node.js ${process.versions.node}`,
     platform: `${platform() === 'linux' ? 'Linux' : platform()} ${release().split('-')[0]}`,
   })),
 );
+
+// ---------- preferences ----------
+app.get('/api/settings', route(() => ({ ...settings.get(), dataDir: settings.dataDir() })));
+app.post('/api/settings', json, route((req) => ({ ...settings.set(req.body || {}), dataDir: settings.dataDir() })));
 
 // ---------- metadata ----------
 
@@ -202,7 +225,7 @@ app.post(
   json,
   route(async (req) => {
     const statements = Array.isArray(req.body.statements) ? req.body.statements.map(String).filter((s) => s.trim()) : [];
-    if (!statements.length) throw new Error('Tidak ada statement');
+    if (!statements.length) throw new Error(t('No statements to run'));
     try {
       return await db.execScript(C(req), req.body.ns || null, statements, { continueOnError: Boolean(req.body.continueOnError) });
     } catch (e) {
@@ -219,8 +242,8 @@ app.post(
   route((req) => {
     const conn = C(req);
     const model = req.body.model;
-    if (!model?.name) throw new Error('Nama tabel wajib diisi');
-    if (!model.columns?.length) throw new Error('Tambahkan minimal satu kolom');
+    if (!model?.name) throw new Error(t('Table name is required'));
+    if (!model.columns?.length) throw new Error(t('Add at least one column'));
     return { statements: schema.createTableStatements(model, conn.type, { ns: req.body.ns, srcNs: req.body.ns, fkMode: 'inline' }) };
   }),
 );
@@ -272,7 +295,7 @@ app.post(
     const src = connOr404(b.srcId);
     const dst = connOr404(b.dstId);
     const n = (b.tables || []).length;
-    const job = jobs.createJob('copy', `Salin ${n} tabel → ${dst.name}${b.dstNs && dst.type !== 'sqlite' ? ' / ' + b.dstNs : ''}`, (ctx) =>
+    const job = jobs.createJob('copy', plural(n, 'Copy {n} table → {target}', 'Copy {n} tables → {target}', { target: dst.name + (b.dstNs && dst.type !== 'sqlite' ? ' / ' + b.dstNs : '') }), (ctx) =>
       runCopy(ctx, { ...b, src, dst }),
     );
     return jobs.publicJob(job);
@@ -283,7 +306,7 @@ app.post(
   json,
   route((req) => {
     const conn = connOr404(req.body.connId);
-    const job = jobs.createJob('dump', `Export SQL ${conn.name}${req.body.ns ? ' / ' + req.body.ns : ''}`, (ctx) => runDump(ctx, { ...req.body, conn }));
+    const job = jobs.createJob('dump', t('SQL export {target}', { target: conn.name + (req.body.ns ? ' / ' + req.body.ns : '') }), (ctx) => runDump(ctx, { ...req.body, conn }));
     return jobs.publicJob(job);
   }),
 );
@@ -292,7 +315,7 @@ app.post(
   json,
   route((req) => {
     const conn = connOr404(req.body.connId);
-    const job = jobs.createJob('export', `Export ${req.body.table} (${String(req.body.format || 'csv').toUpperCase()})`, (ctx) =>
+    const job = jobs.createJob('export', t('Export {table} ({format})', { table: req.body.table, format: String(req.body.format || 'csv').toUpperCase() }), (ctx) =>
       runTableExport(ctx, { ...req.body, conn }),
     );
     return jobs.publicJob(job);
@@ -304,8 +327,8 @@ app.post(
   route((req) => {
     const conn = connOr404(req.query.connId);
     const sql = typeof req.body === 'string' ? req.body : '';
-    if (!sql.trim()) throw new Error('File SQL kosong');
-    const job = jobs.createJob('import', `Import SQL ke ${conn.name}${req.query.ns ? ' / ' + req.query.ns : ''}`, (ctx) =>
+    if (!sql.trim()) throw new Error(t('The SQL file is empty'));
+    const job = jobs.createJob('import', t('SQL import into {target}', { target: conn.name + (req.query.ns ? ' / ' + req.query.ns : '') }), (ctx) =>
       runImport(ctx, { conn, ns: req.query.ns || null, sql, continueOnError: req.query.continueOnError === '1' }),
     );
     return jobs.publicJob(job);
@@ -316,11 +339,153 @@ app.get(
   '/api/jobs/:jobId',
   route((req) => {
     const j = jobs.getJob(req.params.jobId);
-    if (!j) throw new Error('Job tidak ditemukan');
+    if (!j) throw new Error(t('Job not found'));
     return jobs.publicJob(j);
   }),
 );
 app.post('/api/jobs/:jobId/cancel', route((req) => ({ ok: jobs.cancelJob(req.params.jobId) })));
+
+// ---------- connection management ----------
+
+app.post('/api/connections/patch', json, route((req) => store.patch(req.body.ids, req.body.fields).map(store.redact)));
+app.post('/api/connections/group-rename', json, route((req) => (store.renameGroup(req.body.from, req.body.to), { ok: true })));
+app.post(
+  '/api/connections/export',
+  json,
+  route((req) => {
+    const ids = new Set(req.body.ids || []);
+    const conns = store.list().filter((c) => !ids.size || ids.has(c.id));
+    if (!conns.length) throw new Error(t('No connections to export'));
+    return { content: connio.exportConnections(conns, { includePasswords: Boolean(req.body.includePasswords), passphrase: String(req.body.passphrase || '') }), count: conns.length };
+  }),
+);
+app.post(
+  '/api/connections/import/preview',
+  express.json({ limit: '20mb' }),
+  route((req) => {
+    const s = connio.startImport(req.body);
+    const existing = store.list();
+    return {
+      id: s.id,
+      source: s.source,
+      items: s.items.map((it) => ({ ...connio.previewItem(it), duplicate: !it.skip && existing.some((e) => connio.sameTarget(e, it.conn)) })),
+    };
+  }),
+);
+app.post(
+  '/api/connections/import/commit',
+  json,
+  route((req) => {
+    const s = connio.takeImport(req.body.id);
+    const pickIdx = new Set(req.body.indices || []);
+    const group = String(req.body.group || '').trim();
+    const items = s.items
+      .filter((it, i) => pickIdx.has(i) && !it.skip)
+      .map((it) => ({ ...it.conn, ...(group ? { group } : {}) }));
+    return { imported: store.addMany(items).length };
+  }),
+);
+
+// ---------- data sync ----------
+
+app.post(
+  '/api/jobs/datasync/compare',
+  json,
+  route((req) => {
+    const src = connOr404(req.body.srcId);
+    const dst = connOr404(req.body.dstId);
+    return jobs.publicJob(jobs.createJob('datasync', t('Compare data → {name}', { name: dst.name }), (ctx) => runDataCompare(ctx, { ...req.body, src, dst })));
+  }),
+);
+app.post(
+  '/api/jobs/datasync/apply',
+  json,
+  route((req) => jobs.publicJob(jobs.createJob('datasync', t('Sync data'), (ctx) => runDataApply(ctx, req.body)))),
+);
+app.post(
+  '/api/jobs/datasync/script',
+  json,
+  route((req) => jobs.publicJob(jobs.createJob('export', t('Data sync script'), (ctx) => runDataScript(ctx, req.body)))),
+);
+
+// ---------- data generator ----------
+
+app.get('/api/datagen/generators', route(() => generatorList()));
+app.get('/api/c/:id/datagen/plan', route((req) => planTable(C(req), req.query.ns, req.query.table)));
+app.post('/api/datagen/sample', json, route((req) => ({ values: sampleValues(req.body.spec || {}, 5) })));
+app.post(
+  '/api/jobs/datagen',
+  json,
+  route((req) => {
+    const conn = connOr404(req.body.connId);
+    const n = (req.body.tables || []).reduce((s, tb) => s + Number(tb.rows || 0), 0);
+    return jobs.publicJob(jobs.createJob('datagen', plural(n, 'Generate {n} row', 'Generate {n} rows'), (ctx) => runGenerate(ctx, { ...req.body, conn })));
+  }),
+);
+
+// ---------- find in database ----------
+
+app.post(
+  '/api/jobs/find',
+  json,
+  route((req) => {
+    const conn = connOr404(req.body.connId);
+    return jobs.publicJob(jobs.createJob('find', t('Find "{term}"', { term: String(req.body.term).slice(0, 40) }), (ctx) => runFind(ctx, { ...req.body, conn })));
+  }),
+);
+
+// ---------- documentation & files ----------
+
+app.get(
+  '/api/c/:id/dictionary',
+  route(async (req) => {
+    const conn = C(req);
+    return buildDictionary(conn, req.query.ns, { format: req.query.format === 'md' ? 'md' : 'html' });
+  }),
+);
+app.post('/api/xlsx', express.json({ limit: '256mb' }), (req, res) => {
+  try {
+    const buf = buildXlsx(req.body.columns || [], req.body.rows || [], req.body.sheet || 'Data');
+    res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(buf);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- backup & restore ----------
+
+app.get('/api/c/:id/backups', route((req) => listBackups(C(req).id)));
+app.post(
+  '/api/c/:id/backups',
+  json,
+  route((req) => {
+    const conn = C(req);
+    return jobs.publicJob(jobs.createJob('backup', t('Backup {target}', { target: conn.name + (req.body.ns && conn.type !== 'sqlite' ? ' / ' + req.body.ns : '') }), (ctx) => runBackup(ctx, { ...req.body, conn })));
+  }),
+);
+app.post(
+  '/api/c/:id/backups/:bid/restore',
+  json,
+  route((req) => {
+    const conn = C(req);
+    return jobs.publicJob(jobs.createJob('restore', t('Restore into {name}', { name: conn.name }), (ctx) => runRestore(ctx, { ...req.body, conn, backupId: req.params.bid })));
+  }),
+);
+app.delete('/api/c/:id/backups/:bid', route((req) => deleteBackup(C(req).id, req.params.bid)));
+app.post(
+  '/api/c/:id/backups/:bid/download',
+  route((req) => {
+    const conn = C(req);
+    return jobs.publicJob(
+      jobs.createJob('export', t('Download backup'), (ctx) => {
+        const file = join(tmpdir(), `dbstudio-${ctx.job.id}.sql`);
+        const r = exportBackup(conn.id, req.params.bid, file);
+        ctx.setFile(file, r.fileName);
+        return r;
+      }),
+    );
+  }),
+);
 
 // File download for finished export jobs. A plain <a href> cannot send X-DBStudio, so a per-job
 // random token authorizes the download instead.

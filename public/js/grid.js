@@ -1,9 +1,10 @@
 // Data grid shared by query results, table data, structure and server views.
 import { esc, icon, valStr, copyText, showMenu, clamp, fmtNum, DEFAULT } from './core.js';
 import { motionOK } from './fx.js';
+import { t } from './i18n.js';
 
-function shortType(t) {
-  return String(t || '').replace(/ unsigned/i, ' uns').replace(/character varying/i, 'varchar').replace(/timestamp without time zone/i, 'timestamp').slice(0, 24);
+function shortType(ty) {
+  return String(ty || '').replace(/ unsigned/i, ' uns').replace(/character varying/i, 'varchar').replace(/timestamp without time zone/i, 'timestamp').slice(0, 24);
 }
 
 function cellHtml(v, extra = '') {
@@ -76,7 +77,7 @@ export function renderGrid(wrap, o) {
   if (shown < count) {
     const more = document.createElement('div');
     more.className = 'grid-more';
-    more.innerHTML = `Menampilkan ${fmtNum(shown)} dari ${fmtNum(count)} baris · <button class="btn sm">${icon('chevrons-down')}<span>Tampilkan lebih banyak</span></button>`;
+    more.innerHTML = `${t('Showing {shown} of {total} rows', { shown: fmtNum(shown), total: fmtNum(count) })} · <button class="btn sm">${icon('chevrons-down')}<span>${t('Show more')}</span></button>`;
     more.querySelector('button').onclick = () => o.onMore?.();
     wrap.append(more);
   }
@@ -139,6 +140,7 @@ export function renderGrid(wrap, o) {
     const r = td.parentElement.sectionRowIndex;
     if (td.classList.contains('rownum')) return o.onRowNumClick?.(r, e);
     setActive(r, td.cellIndex - 1, false);
+    o.onCellClick?.(r, td.cellIndex - 1, e);
   };
   table.ondblclick = (e) => {
     const td = e.target.closest('td');
@@ -153,13 +155,13 @@ export function renderGrid(wrap, o) {
     setActive(r, c, false);
     if (o.onCellMenu) return o.onCellMenu(e, r, c);
     showMenu(e, [
-      { label: 'Salin nilai', icon: 'copy', action: () => copyText(valStr(getValue(r, c))) },
+      { label: t('Copy value'), icon: 'copy', action: () => copyText(valStr(getValue(r, c))) },
       {
-        label: 'Salin baris (JSON)',
+        label: t('Copy row (JSON)'),
         icon: 'braces',
         action: () => copyText(JSON.stringify(Object.fromEntries(o.columns.map((col, i) => [col, getValue(r, i)])), null, 2)),
       },
-      { label: 'Salin kolom', icon: 'columns-3', action: () => copyText(Array.from({ length: shown }, (_, i) => valStr(getValue(i, c))).join('\n')) },
+      { label: t('Copy column'), icon: 'columns-3', action: () => copyText(Array.from({ length: shown }, (_, i) => valStr(getValue(i, c))).join('\n')) },
     ]);
   };
   wrap.onkeydown = (e) => {
@@ -182,9 +184,12 @@ export function renderGrid(wrap, o) {
     } else if (e.key === 'Enter' || e.key === 'F2') {
       e.preventDefault();
       edit(a.r, a.c);
+    } else if (e.key === ' ' && o.onViewKey) {
+      e.preventDefault();
+      o.onViewKey(a.r, a.c);
     }
   };
-  return { edit, setActive };
+  return { edit, setActive, active: () => wrap._active };
 }
 
 export function toCSV(columns, rows) {

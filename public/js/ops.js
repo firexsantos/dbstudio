@@ -1,36 +1,37 @@
 // Schema operations: create/drop database or schema, rename/truncate/drop tables, routine & trigger definitions.
-import { h, icon, esc, api, qs, state, app, toast, modal, sqlPreview, promptDialog, segmented, select, field, connById, quoteIdent, qualify, TYPE_LABEL, nsLabel, COLORS } from './core.js';
+import { h, icon, esc, api, qs, state, app, toast, modal, sqlPreview, promptDialog, segmented, select, field, connById, quoteIdent, qualify, TYPE_LABEL, COLORS } from './core.js';
 import { closeTab } from './tabs.js';
 import { forgetNamespaces } from './conn.js';
 import { invalidateSchema } from './table.js';
+import { t } from './i18n.js';
 
 export async function createNamespace({ connId = state.active?.conn.id, onCreated } = {}) {
   const conn = connById(connId);
-  if (!conn) return toast('Pilih koneksi dulu', 'err');
+  if (!conn) return toast(t('Select a connection first'), 'err');
   const type = conn.type;
   if (type === 'sqlite') {
     modal({
-      title: 'Database SQLite baru',
+      title: t('New SQLite database'),
       icon: 'database',
-      body: h('div', { class: 'muted', html: 'Di SQLite, <b>satu file = satu database</b>. Buat koneksi SQLite baru dengan path file yang belum ada — file-nya akan dibuat otomatis saat terhubung.' }),
-      actions: ['spacer', { label: 'Tutup' }, { label: 'Koneksi SQLite baru', kind: 'primary', icon: 'plus', onClick: () => (setTimeout(() => app.openConnDialog(null, { type: 'sqlite' })), true) }],
+      body: h('div', { class: 'muted', html: t('In SQLite, <b>one file is one database</b>. Create a new SQLite connection with a file path that does not exist yet — the file is created automatically when you connect.') }),
+      actions: ['spacer', { label: t('Close') }, { label: t('New SQLite connection'), kind: 'primary', icon: 'plus', onClick: () => (setTimeout(() => app.openConnDialog(null, { type: 'sqlite' })), true) }],
     });
     return;
   }
-  const name = h('input', { class: 'input mono', placeholder: type === 'postgres' ? 'nama_schema' : 'nama_database' });
+  const name = h('input', { class: 'input mono', placeholder: type === 'postgres' ? t('schema_name') : t('database_name') });
   const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } });
   let kind = 'schema';
   let charset;
   let collation;
-  const hint = h('div', { class: 'notice info', hidden: true, html: `${icon('info')}<div>Koneksi PostgreSQL terikat ke satu database. Setelah dibuat, DBStudio otomatis menambahkan koneksi baru ke database tersebut.</div>` });
+  const hint = h('div', { class: 'notice info', hidden: true, html: `${icon('info')}<div>${t('A PostgreSQL connection is bound to a single database. Once it is created, DBStudio automatically adds a new connection to it.')}</div>` });
   if (type === 'postgres') {
     body.append(
-      field('Jenis', segmented([{ value: 'schema', label: 'Schema di database ini', icon: 'folder' }, { value: 'database', label: 'Database baru', icon: 'database' }], 'schema', (v) => {
+      field(t('Type'), segmented([{ value: 'schema', label: t('Schema in this database'), icon: 'folder' }, { value: 'database', label: t('New database'), icon: 'database' }], 'schema', (v) => {
         kind = v;
-        name.placeholder = v === 'database' ? 'nama_database' : 'nama_schema';
+        name.placeholder = v === 'database' ? t('database_name') : t('schema_name');
         hint.hidden = v !== 'database';
       })),
-      field('Nama', name),
+      field(t('Name'), name),
       hint,
     );
   } else {
@@ -44,34 +45,34 @@ export async function createNamespace({ connId = state.active?.conn.id, onCreate
     };
     charset.onchange = fillColl;
     fillColl();
-    body.append(field('Nama database', name), h('div', { class: 'form-grid' }, field('Character set', charset), field('Collation', collation)));
+    body.append(field(t('Database name'), name), h('div', { class: 'form-grid' }, field('Character set', charset), field('Collation', collation)));
   }
   modal({
-    title: `${type === 'postgres' ? 'Schema / database' : 'Database'} baru`,
+    title: type === 'postgres' ? t('New schema / database') : t('New database'),
     sub: `${conn.name} · ${TYPE_LABEL[type]}`,
     icon: 'folder-plus',
     body,
     actions: [
       'spacer',
-      { label: 'Batal' },
+      { label: t('Cancel') },
       {
-        label: 'Lanjut',
+        label: t('Continue'),
         kind: 'primary',
         icon: 'arrow-right',
         onClick: async () => {
           const n = name.value.trim();
-          if (!n) throw new Error('Nama wajib diisi');
+          if (!n) throw new Error(t('Name is required'));
           const { statements } = await api('POST', `/api/c/${connId}/sql/namespace`, { action: 'create', name: n, kind, charset: charset?.value, collation: collation?.value });
           setTimeout(async () => {
-            const ok = await sqlPreview({ title: `Buat ${kind === 'database' || type === 'mysql' ? 'database' : 'schema'} ${n}`, statements, connId, type, confirmLabel: 'Buat' });
+            const ok = await sqlPreview({ title: kind === 'database' || type === 'mysql' ? t('Create database {name}', { name: n }) : t('Create schema {name}', { name: n }), statements, connId, type, confirmLabel: t('Create') });
             if (!ok) return;
-            toast(`${n} dibuat`, 'ok', { title: 'Berhasil' });
+            toast(t('{name} created', { name: n }), 'ok', { title: t('Success') });
             forgetNamespaces(connId);
             if (type === 'postgres' && kind === 'database') {
               const { id, hasPassword, ...rest } = conn;
               const created = await api('POST', '/api/connections', { ...rest, database: n, name: `${conn.name} / ${n}`, copyPasswordFrom: id, color: COLORS[(COLORS.indexOf(conn.color) + 1) % COLORS.length] });
               await app.loadConns();
-              toast('Koneksi baru ditambahkan', 'ok', { title: `${conn.name} / ${n}` });
+              toast(t('New connection added'), 'ok', { title: `${conn.name} / ${n}` });
               onCreated?.(n, created.id);
               return;
             }
@@ -94,24 +95,24 @@ export async function dropNamespace(ns) {
   const type = a.conn.type;
   const confirmInput = h('input', { class: 'input mono', placeholder: ns });
   modal({
-    title: `Hapus ${nsLabel(type).toLowerCase()} "${ns}"?`,
+    title: type === 'postgres' ? t('Drop schema "{name}"?', { name: ns }) : t('Drop database "{name}"?', { name: ns }),
     icon: 'triangle-alert',
     danger: true,
-    body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, h('div', { class: 'notice danger', html: `${icon('flame')}<div>Semua tabel, view, data, dan routine di dalamnya akan <b>hilang permanen</b>. Tindakan ini tidak bisa dibatalkan.</div>` }), field(`Ketik "${ns}" untuk konfirmasi`, confirmInput)),
+    body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, h('div', { class: 'notice danger', html: `${icon('flame')}<div>${t('All tables, views, data and routines in it will be <b>permanently lost</b>. This cannot be undone.')}</div>` }), field(t('Type "{name}" to confirm', { name: ns }), confirmInput)),
     actions: [
       'spacer',
-      { label: 'Batal' },
+      { label: t('Cancel') },
       {
-        label: 'Lanjut',
+        label: t('Continue'),
         kind: 'danger solid',
         onClick: async () => {
-          if (confirmInput.value.trim() !== ns) throw new Error('Nama tidak cocok');
+          if (confirmInput.value.trim() !== ns) throw new Error(t('Name does not match'));
           const { statements } = await api('POST', `/api/c/${a.conn.id}/sql/namespace`, { action: 'drop', name: ns, kind: 'schema' });
           setTimeout(async () => {
-            const ok = await sqlPreview({ title: `Hapus ${ns}`, statements, connId: a.conn.id, type, danger: true, confirmLabel: 'Hapus permanen' });
+            const ok = await sqlPreview({ title: t('Drop {name}', { name: ns }), statements, connId: a.conn.id, type, danger: true, confirmLabel: t('Drop permanently') });
             if (!ok) return;
-            toast(`${ns} dihapus`, 'ok');
-            for (const t of [...state.tabs]) if (t.connId === a.conn.id && t.ns === ns) await closeTab(t.id, true);
+            toast(t('{name} dropped', { name: ns }), 'ok');
+            for (const tb of [...state.tabs]) if (tb.connId === a.conn.id && tb.ns === ns) await closeTab(tb.id, true);
             forgetNamespaces(a.conn.id);
             await app.refreshNamespaces();
             await app.loadTree();
@@ -129,19 +130,19 @@ export async function tableOp(op, table, kind = 'table') {
   const type = a.conn.type;
   let newName;
   if (op === 'rename') {
-    newName = await promptDialog({ title: `Ganti nama ${kind === 'view' ? 'view' : 'tabel'}`, label: 'Nama baru', value: table, icon: 'text-cursor-input' });
+    newName = await promptDialog({ title: kind === 'view' ? t('Rename view') : t('Rename table'), label: t('New name'), value: table, icon: 'text-cursor-input' });
     if (!newName || newName === table) return;
   }
   try {
     const { statements } = await api('POST', `/api/c/${a.conn.id}/sql/table-op`, { ns: a.ns, op, table, newName, kind });
     const danger = op !== 'rename';
     const warn = {
-      drop: [`${kind === 'view' ? 'View' : 'Tabel'} "${table}" dan seluruh datanya akan dihapus permanen.`],
-      truncate: [`Semua baris di "${table}" akan dihapus permanen.`],
+      drop: [kind === 'view' ? t('View "{name}" and all its data will be permanently deleted.', { name: table }) : t('Table "{name}" and all its data will be permanently deleted.', { name: table })],
+      truncate: [t('All rows in "{name}" will be permanently deleted.', { name: table })],
       rename: [],
     }[op];
     const ok = await sqlPreview({
-      title: { drop: `Hapus ${table}`, truncate: `Kosongkan ${table}`, rename: `Ganti nama ${table} → ${newName}` }[op],
+      title: { drop: t('Drop {name}', { name: table }), truncate: t('Truncate {name}', { name: table }), rename: t('Rename {name} → {newName}', { name: table, newName }) }[op],
       sub: `${TYPE_LABEL[type]} · ${a.ns}`,
       statements,
       warnings: warn,
@@ -149,12 +150,12 @@ export async function tableOp(op, table, kind = 'table') {
       ns: a.ns,
       type,
       danger,
-      confirmLabel: { drop: 'Hapus', truncate: 'Kosongkan', rename: 'Ganti nama' }[op],
+      confirmLabel: { drop: t('Drop'), truncate: t('Truncate'), rename: t('Rename') }[op],
     });
     if (!ok) return;
-    toast({ drop: `${table} dihapus`, truncate: `${table} dikosongkan`, rename: `${table} → ${newName}` }[op], 'ok');
+    toast({ drop: t('{name} dropped', { name: table }), truncate: t('{name} truncated', { name: table }), rename: `${table} → ${newName}` }[op], 'ok');
     invalidateSchema();
-    if (op !== 'truncate') for (const t of [...state.tabs]) if (t.connId === a.conn.id && t.ns === a.ns && t.table === table) await closeTab(t.id, true);
+    if (op !== 'truncate') for (const tb of [...state.tabs]) if (tb.connId === a.conn.id && tb.ns === a.ns && tb.table === table) await closeTab(tb.id, true);
     await app.loadTree();
     if (op === 'rename') app.openTableTab(newName);
   } catch (e) {
@@ -175,31 +176,49 @@ export async function showObjectDef(kind, item) {
 
 export async function dropObject(kind, item) {
   const a = state.active;
-  const t = a.conn.type;
+  const ty = a.conn.type;
   const what = { procedure: 'PROCEDURE', function: 'FUNCTION', trigger: 'TRIGGER', event: 'EVENT' }[kind];
   let sql;
-  if (t === 'mysql') sql = `DROP ${what} ${qualify(t, a.ns, item.name)};`;
-  else if (t === 'postgres') {
-    if (kind === 'trigger') sql = `DROP TRIGGER ${quoteIdent(item.name, t)} ON ${qualify(t, a.ns, item.tbl)};`;
+  if (ty === 'mysql') sql = `DROP ${what} ${qualify(ty, a.ns, item.name)};`;
+  else if (ty === 'postgres') {
+    if (kind === 'trigger') sql = `DROP TRIGGER ${quoteIdent(item.name, ty)} ON ${qualify(ty, a.ns, item.tbl)};`;
     else {
       const m = /^([^(]+)(\(.*\))$/.exec(item.name);
-      sql = `DROP ${what} ${quoteIdent(a.ns, t)}.${quoteIdent(m ? m[1] : item.name, t)}${m ? m[2] : ''};`;
+      sql = `DROP ${what} ${quoteIdent(a.ns, ty)}.${quoteIdent(m ? m[1] : item.name, ty)}${m ? m[2] : ''};`;
     }
-  } else sql = `DROP TRIGGER ${quoteIdent(item.name, t)};`;
-  const ok = await sqlPreview({ title: `Hapus ${kind} ${item.name}`, statements: [sql], connId: a.conn.id, ns: a.ns, type: t, danger: true, confirmLabel: 'Hapus' });
+  } else sql = `DROP TRIGGER ${quoteIdent(item.name, ty)};`;
+  const title = {
+    procedure: t('Drop procedure {name}', { name: item.name }),
+    function: t('Drop function {name}', { name: item.name }),
+    trigger: t('Drop trigger {name}', { name: item.name }),
+    event: t('Drop event {name}', { name: item.name }),
+  }[kind];
+  const ok = await sqlPreview({ title, statements: [sql], connId: a.conn.id, ns: a.ns, type: ty, danger: true, confirmLabel: t('Drop') });
   if (ok) {
-    toast(`${item.name} dihapus`, 'ok');
+    toast(t('{name} dropped', { name: item.name }), 'ok');
     app.loadTree();
   }
 }
 
 export function openTool(name, opts = {}) {
-  const needConn = ['erd', 'transfer', 'server'];
+  const needConn = ['erd', 'transfer', 'server', 'datagen', 'finder', 'qb', 'dictionary', 'backup'];
   if (needConn.includes(name) && !state.active) {
-    toast('Hubungkan ke database dulu', 'err', { title: 'Belum terhubung' });
+    toast(t('Connect to a database first'), 'err', { title: t('Not connected') });
     return app.showPanel('connections');
   }
-  ({ erd: () => app.openErd(opts), copy: () => app.openCopy(opts), transfer: () => app.openTransfer(opts), compare: () => app.openCompare(opts), server: () => app.openServer(opts) })[name]?.();
+  ({
+    erd: () => app.openErd(opts),
+    copy: () => app.openCopy(opts),
+    transfer: () => app.openTransfer(opts),
+    compare: () => app.openCompare(opts),
+    server: () => app.openServer(opts),
+    datasync: () => app.openDataSync(opts),
+    datagen: () => app.openDataGen(opts),
+    finder: () => app.openFinder(opts),
+    qb: () => app.openQueryBuilder(opts),
+    dictionary: () => app.openDictionary(opts),
+    backup: () => app.openBackup(opts),
+  })[name]?.();
 }
 
 Object.assign(app, { createNamespace, dropNamespace, tableOp, showObjectDef, dropObject, openTool });

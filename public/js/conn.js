@@ -4,6 +4,7 @@ import {
   TYPE_LABEL, DEFAULT_PORT, COLORS, engineBadge,
 } from './core.js';
 import { closeTab } from './tabs.js';
+import { t } from './i18n.js';
 
 export async function loadConns() {
   state.conns = await api('GET', '/api/connections');
@@ -33,10 +34,10 @@ export async function connect(id, { silent = false } = {}) {
     app.showPanel('explorer');
     await app.loadTree();
     if (!state.tabs.length) app.newQueryTab();
-    if (!silent) toast(`${TYPE_LABEL[conn.type]} ${info.version ? '· ' + String(info.version).split(' ')[0] : ''}`, 'ok', { title: `Terhubung ke ${conn.name}` });
+    if (!silent) toast(`${TYPE_LABEL[conn.type]} ${info.version ? '· ' + String(info.version).split(' ')[0] : ''}`, 'ok', { title: t('Connected to {name}', { name: conn.name }) });
   } catch (e) {
     emit('connect-failed', id);
-    toast(e.message, 'err', { title: `Gagal terhubung ke ${conn.name}` });
+    toast(e.message, 'err', { title: t('Could not connect to {name}', { name: conn.name }) });
   }
 }
 
@@ -54,32 +55,32 @@ export async function disconnect() {
 
 export async function deleteConn(c) {
   const ok = await confirmDialog({
-    title: 'Hapus koneksi?',
-    message: `Koneksi <b>${esc(c.name)}</b> akan dihapus dari daftar. Database-nya sendiri <b>tidak</b> terpengaruh.`,
+    title: t('Delete connection?'),
+    message: t('Connection <b>{name}</b> will be removed from the list. The database itself is <b>not</b> affected.', { name: esc(c.name) }),
     danger: true,
-    confirmLabel: 'Hapus koneksi',
+    confirmLabel: t('Delete connection'),
   });
   if (!ok) return;
   if (state.active?.conn.id === c.id) await disconnect();
-  for (const t of [...state.tabs]) if (t.connId === c.id) await closeTab(t.id, true);
+  for (const tab of [...state.tabs]) if (tab.connId === c.id) await closeTab(tab.id, true);
   await api('DELETE', `/api/connections/${c.id}`);
   await loadConns();
 }
 
 export async function duplicateConn(c) {
   const { id, hasPassword, ...rest } = c;
-  await api('POST', '/api/connections', { ...rest, name: c.name + ' (salinan)', copyPasswordFrom: id });
+  await api('POST', '/api/connections', { ...rest, name: t('{name} (copy)', { name: c.name }), copyPasswordFrom: id });
   await loadConns();
-  toast('Koneksi diduplikat', 'ok');
+  toast(t('Connection duplicated'), 'ok');
 }
 
 export async function openDemo() {
   try {
     const d = await api('GET', '/api/demo');
-    if (!d.exists) return toast('Database demo belum dibuat. Jalankan: npm run demo', 'err');
+    if (!d.exists) return toast(t('The demo database has not been created yet. Run: npm run demo'), 'err');
     let c = state.conns.find((x) => x.type === 'sqlite' && x.file === d.file);
     if (!c) {
-      c = await api('POST', '/api/connections', { type: 'sqlite', name: 'Demo – Toko', file: d.file, color: COLORS[2] });
+      c = await api('POST', '/api/connections', { type: 'sqlite', name: t('Demo – Shop'), file: d.file, color: COLORS[2] });
       await loadConns();
     }
     await connect(c.id);
@@ -97,34 +98,35 @@ export function openConnDialog(existing = null, preset = {}) {
 
   const inp = (name, attrs = {}) => h('input', { class: 'input', name, value: src[name] ?? '', autocomplete: 'off', ...attrs });
   const f = {
-    name: inp('name', { placeholder: 'mis. Produksi – toko' }),
+    name: inp('name', { placeholder: t('e.g. Production – shop') }),
+    group: inp('group', { placeholder: t('No group'), list: 'conn-group-list' }),
     host: inp('host', { placeholder: '127.0.0.1' }),
     port: inp('port', { type: 'number', placeholder: '3306' }),
     user: inp('user'),
-    password: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: existing?.hasPassword ? '•••••• tersimpan — kosongkan untuk tetap' : '' }),
-    database: inp('database', { placeholder: 'opsional' }),
-    file: inp('file', { placeholder: '/home/kamu/data/app.db' }),
-    sshHost: h('input', { class: 'input', value: ssh.host || '', placeholder: 'server.contoh.com' }),
+    password: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: existing?.hasPassword ? t('•••••• saved — leave empty to keep it') : '' }),
+    database: inp('database', { placeholder: t('optional') }),
+    file: inp('file', { placeholder: t('/home/you/data/app.db') }),
+    sshHost: h('input', { class: 'input', value: ssh.host || '', placeholder: t('server.example.com') }),
     sshPort: h('input', { class: 'input', type: 'number', value: ssh.port || 22 }),
     sshUser: h('input', { class: 'input', value: ssh.user || '', placeholder: 'ubuntu' }),
-    sshPassword: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: ssh.hasPassword ? '•••••• tersimpan' : '' }),
+    sshPassword: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: ssh.hasPassword ? t('•••••• saved') : '' }),
     sshKey: h('input', { class: 'input mono', value: ssh.keyFile || '', placeholder: '~/.ssh/id_ed25519' }),
-    sshPass: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: ssh.hasPassphrase ? '•••••• tersimpan' : 'kosongkan jika tanpa passphrase' }),
+    sshPass: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: ssh.hasPassphrase ? t('•••••• saved') : t('leave empty if there is no passphrase') }),
   };
-  const ssl = toggle('Gunakan SSL/TLS', Boolean(src.ssl));
-  const sshOn = toggle('Hubungkan lewat SSH tunnel', Boolean(ssh.enabled), () => syncSsh());
+  const ssl = toggle(t('Use SSL/TLS'), Boolean(src.ssl));
+  const sshOn = toggle(t('Connect through an SSH tunnel'), Boolean(ssh.enabled), () => syncSsh());
 
   // engine picker
   const engines = h('div', { class: 'engine-pick' });
   const ENG = [
     ['mysql', 'MySQL / MariaDB', 'Port 3306'],
     ['postgres', 'PostgreSQL', 'Port 5432'],
-    ['sqlite', 'SQLite', 'File lokal'],
+    ['sqlite', 'SQLite', t('Local file')],
   ];
-  for (const [t, name, sub] of ENG) {
-    const b = h('button', { type: 'button', html: `${engineBadge(t)}<div><div class="ep-name">${name}</div><div class="ep-sub">${sub}</div></div>` });
-    b.onclick = () => setType(t);
-    b.dataset.type = t;
+  for (const [ty, name, sub] of ENG) {
+    const b = h('button', { type: 'button', html: `${engineBadge(ty)}<div><div class="ep-name">${name}</div><div class="ep-sub">${sub}</div></div>` });
+    b.onclick = () => setType(ty);
+    b.dataset.type = ty;
     engines.append(b);
   }
 
@@ -146,15 +148,16 @@ export function openConnDialog(existing = null, preset = {}) {
   const general = h(
     'div',
     { class: 'form-grid' },
-    h('div', { class: 'full' }, field('Nama koneksi', f.name)),
+    h('div', {}, field(t('Connection name'), f.name)),
+    h('div', {}, field(t('Group'), f.group), h('datalist', { id: 'conn-group-list' }, ...[...new Set(state.conns.map((c) => c.group).filter(Boolean))].map((g) => h('option', { value: g })))),
     h('div', { class: 'net' }, field('Host', f.host)),
     h('div', { class: 'net' }, field('Port', f.port)),
     h('div', { class: 'net' }, field('User', f.user)),
     h('div', { class: 'net' }, field('Password', f.password)),
-    h('div', { class: 'net full' }, field('Database', f.database, 'Kosongkan untuk melihat semua database di server.')),
+    h('div', { class: 'net full' }, field('Database', f.database, t('Leave empty to see every database on the server.'))),
     h('div', { class: 'net full' }, ssl),
-    h('div', { class: 'file full' }, field('Path file SQLite', f.file, 'File yang belum ada akan dibuat otomatis — cara membuat database SQLite baru.')),
-    h('div', { class: 'full' }, field('Warna penanda', colors)),
+    h('div', { class: 'file full' }, field(t('SQLite file path'), f.file, t('A file that does not exist yet is created automatically — that is how you make a new SQLite database.'))),
+    h('div', { class: 'full' }, field(t('Label color'), colors)),
   );
 
   const authSeg = segmented(
@@ -172,24 +175,24 @@ export function openConnDialog(existing = null, preset = {}) {
     h('div', {}, field('SSH host', f.sshHost)),
     h('div', {}, field('SSH port', f.sshPort)),
     h('div', { class: 'full' }, field('SSH user', f.sshUser)),
-    h('div', { class: 'full' }, field('Metode autentikasi', authSeg)),
+    h('div', { class: 'full' }, field(t('Authentication method'), authSeg)),
     h('div', { class: 'full ssh-pw' }, field('SSH password', f.sshPassword)),
-    h('div', { class: 'full ssh-key' }, field('File private key', f.sshKey, 'Path di komputer ini, mis. <span class="mono">~/.ssh/id_ed25519</span>')),
-    h('div', { class: 'full ssh-key' }, field('Passphrase key', f.sshPass)),
-    h('div', { class: 'full ssh-agent' }, h('div', { class: 'notice info', html: icon('info') + '<div>Memakai kunci dari ssh-agent (<span class="mono">SSH_AUTH_SOCK</span>) milik proses DBStudio.</div>' })),
+    h('div', { class: 'full ssh-key' }, field(t('Private key file'), f.sshKey, t('Path on this computer, e.g. <span class="mono">~/.ssh/id_ed25519</span>'))),
+    h('div', { class: 'full ssh-key' }, field(t('Key passphrase'), f.sshPass)),
+    h('div', { class: 'full ssh-agent' }, h('div', { class: 'notice info', html: icon('info') + `<div>${t('Uses the keys from the ssh-agent (<span class="mono">SSH_AUTH_SOCK</span>) of the DBStudio process.')}</div>` })),
   );
   const sshPane = h(
     'div',
     { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
     sshOn,
-    h('div', { class: 'notice info', html: icon('route') + '<div>DBStudio membuka koneksi SSH ke server, lalu meneruskan koneksi database lewat terowongan terenkripsi. <b>Host</b> di tab Umum dilihat dari sisi server SSH — biasanya <span class="mono">127.0.0.1</span>.</div>' }),
+    h('div', { class: 'notice info', html: icon('route') + `<div>${t('DBStudio opens an SSH connection to the server, then forwards the database connection through the encrypted tunnel. The <b>Host</b> on the General tab is seen from the SSH server — usually <span class="mono">127.0.0.1</span>.')}</div>` }),
     sshFields,
   );
 
   const panes = h('div', {}, general, sshPane);
   const tabSeg = segmented(
     [
-      { value: 'general', label: 'Umum', icon: 'plug' },
+      { value: 'general', label: t('General'), icon: 'plug' },
       { value: 'ssh', label: 'SSH Tunnel', icon: 'shield-check' },
     ],
     'general',
@@ -212,24 +215,24 @@ export function openConnDialog(existing = null, preset = {}) {
     sshFields.querySelectorAll('.ssh-key').forEach((e) => (e.hidden = a !== 'key'));
     sshFields.querySelectorAll('.ssh-agent').forEach((e) => (e.hidden = a !== 'agent'));
   }
-  function setType(t) {
-    type = t;
-    engines.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.type === t));
-    general.querySelectorAll('.net').forEach((e) => (e.hidden = t === 'sqlite'));
-    general.querySelectorAll('.file').forEach((e) => (e.hidden = t !== 'sqlite'));
-    tabRow.hidden = t === 'sqlite';
-    if (t === 'sqlite') showPane('general');
-    f.port.placeholder = DEFAULT_PORT[t] || '';
-    f.user.placeholder = t === 'postgres' ? 'postgres' : 'root';
-    f.database.placeholder = t === 'postgres' ? 'postgres' : 'semua database';
+  function setType(ty) {
+    type = ty;
+    engines.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.type === ty));
+    general.querySelectorAll('.net').forEach((e) => (e.hidden = ty === 'sqlite'));
+    general.querySelectorAll('.file').forEach((e) => (e.hidden = ty !== 'sqlite'));
+    tabRow.hidden = ty === 'sqlite';
+    if (ty === 'sqlite') showPane('general');
+    f.port.placeholder = DEFAULT_PORT[ty] || '';
+    f.user.placeholder = ty === 'postgres' ? 'postgres' : 'root';
+    f.database.placeholder = ty === 'postgres' ? 'postgres' : t('all databases');
   }
 
   function read() {
-    const o = { type, name: f.name.value.trim(), color };
+    const o = { type, name: f.name.value.trim(), color, group: f.group.value.trim() || null };
     if (existing) o.id = existing.id;
     if (type === 'sqlite') {
       o.file = f.file.value.trim();
-      if (!o.file) throw new Error('Isi path file SQLite');
+      if (!o.file) throw new Error(t('Enter the SQLite file path'));
     } else {
       o.host = f.host.value.trim() || '127.0.0.1';
       o.port = f.port.value ? Number(f.port.value) : DEFAULT_PORT[type];
@@ -247,7 +250,7 @@ export function openConnDialog(existing = null, preset = {}) {
       };
       if (f.sshPassword.value !== '' || !ssh.hasPassword) o.ssh.password = f.sshPassword.value;
       if (f.sshPass.value !== '' || !ssh.hasPassphrase) o.ssh.passphrase = f.sshPass.value;
-      if (o.ssh.enabled && (!o.ssh.host || !o.ssh.user)) throw new Error('Isi SSH host dan SSH user');
+      if (o.ssh.enabled && (!o.ssh.host || !o.ssh.user)) throw new Error(t('Enter the SSH host and SSH user'));
     }
     if (!o.name) o.name = type === 'sqlite' ? o.file.split('/').pop() || 'SQLite' : `${o.user}@${o.ssh?.enabled ? o.ssh.host : o.host}`;
     return o;
@@ -255,25 +258,26 @@ export function openConnDialog(existing = null, preset = {}) {
 
   const body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, engines, tabRow, panes);
   const m = modal({
-    title: existing ? `Edit koneksi` : 'Koneksi baru',
-    sub: existing ? existing.name : 'MySQL/MariaDB, PostgreSQL, atau SQLite — langsung atau lewat SSH',
+    title: existing ? t('Edit connection') : t('New connection'),
+    sub: existing ? existing.name : t('MySQL/MariaDB, PostgreSQL or SQLite — directly or through SSH'),
     icon: 'plug-zap',
     size: 'wide',
     body,
     actions: [
-      existing ? { label: 'Hapus', kind: 'ghost danger', icon: 'trash-2', onClick: async ({ close }) => { close(); await deleteConn(existing); return false; } } : null,
+      existing ? { label: t('Delete'), kind: 'ghost danger', icon: 'trash-2', onClick: async ({ close }) => { close(); await deleteConn(existing); return false; } } : null,
       testResult,
       'spacer',
       {
-        label: 'Tes',
+        label: t('Test'),
         icon: 'activity',
         onClick: async () => {
           testResult.className = 'test-result';
-          testResult.innerHTML = `${icon('loader-circle')} Menguji…`;
+          testResult.innerHTML = `${icon('loader-circle')} ${t('Testing…')}`;
           try {
             const r = await api('POST', '/api/connections/test', read());
             testResult.className = 'test-result ok';
-            testResult.innerHTML = `${icon('circle-check')} Berhasil${r.tunnel ? ' via SSH' : ''} — ${esc(String(r.version).split(' ').slice(0, 2).join(' '))}`;
+            const version = esc(String(r.version).split(' ').slice(0, 2).join(' '));
+            testResult.innerHTML = `${icon('circle-check')} ${r.tunnel ? t('Connected via SSH — {version}', { version }) : t('Connected — {version}', { version })}`;
           } catch (e) {
             testResult.className = 'test-result err';
             testResult.innerHTML = `${icon('circle-x')} ${esc(e.message)}`;
@@ -282,9 +286,9 @@ export function openConnDialog(existing = null, preset = {}) {
           return false;
         },
       },
-      { label: 'Batal' },
+      { label: t('Cancel') },
       {
-        label: 'Simpan & hubungkan',
+        label: t('Save & connect'),
         kind: 'primary',
         icon: 'zap',
         onClick: async () => {

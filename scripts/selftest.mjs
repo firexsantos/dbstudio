@@ -9,13 +9,24 @@
 // Your existing data is never touched.
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rmSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import * as db from '../lib/drivers.js';
 import * as schema from '../lib/schema.js';
 import { createJob, getJob } from '../lib/jobs.js';
 import { runCopy } from '../lib/copy.js';
 import { runDump, runImport } from '../lib/transfer.js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import * as connio from '../lib/connio.js';
+import { runCompare as dsCompare, runApply as dsApply, runScript as dsScript } from '../lib/datasync.js';
+import { runGenerate, planTable, generatorList } from '../lib/datagen.js';
+import { runFind } from '../lib/finder.js';
+import { buildDictionary } from '../lib/dictionary.js';
+import { buildXlsx } from '../lib/xlsx.js';
+import { createCipheriv, randomBytes } from 'node:crypto';
+import * as settings from '../lib/settings.js';
+import { t, plural, lang, locale } from '../lib/i18n.js';
+import ID from '../public/js/locales/id.js';
 
 const stamp = Date.now().toString(36);
 let failures = 0;
@@ -201,7 +212,7 @@ async function job(fn) {
 
 // ---------------------------------------------------------------- suites
 async function suiteSplit() {
-  console.log('\nPemecah statement');
+  console.log('\nStatement splitter');
   const m = db.splitStatements("DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 'a;b'; END$$\nDELIMITER ;\nSELECT 2;", 'mysql');
   check('MySQL DELIMITER', m.length === 2 && m[0].startsWith('CREATE PROCEDURE') && m[1] === 'SELECT 2', JSON.stringify(m));
   const b = db.splitStatements("SELECT 'it\\'s; ok'; SELECT 2", 'mysql');
@@ -215,7 +226,7 @@ async function suiteSplit() {
 }
 
 async function suiteEngine(E) {
-  console.log(`\n${E.label}: skema, DDL, ALTER`);
+  console.log(`\n${E.label}: schema, DDL, ALTER`);
   const src = await E.make('src');
   await seed(src);
   await verifyData(`${E.type} seed`, src);
@@ -346,6 +357,253 @@ async function suiteDump(from, to) {
   await to.drop('ddst_' + from.type);
 }
 
+
+async function suiteConnio() {
+  console.log('\nConnection import / export');
+  const conns = [
+    { id: 'a', name: 'Prod', type: 'mysql', host: 'db.example.com', port: 3306, user: 'root', password: 'r4hasia!', database: 'toko', group: 'Kantor',
+      ssh: { enabled: true, host: 'bastion', port: 22, user: 'ubuntu', auth: 'password', password: 'sshpw' } },
+    { id: 'b', name: 'Lokal', type: 'sqlite', file: '/tmp/x.db' },
+  ];
+  const plain = connio.exportConnections(conns, { includePasswords: true });
+  const back = connio.parseImport({ content: plain }).items.map((i) => i.conn);
+  check('export → import (plain)', back.length === 2 && back[0].password === 'r4hasia!' && back[0].ssh.password === 'sshpw' && back[0].group === 'Kantor' && !('id' in back[0]));
+  const noPw = connio.parseImport({ content: connio.exportConnections(conns, { includePasswords: false }) }).items[0].conn;
+  check('export without passwords', noPw.password === undefined && noPw.ssh.password === undefined && noPw.user === 'root');
+  const enc = connio.exportConnections(conns, { includePasswords: true, passphrase: 'kunci rahasia' });
+  check('encrypted file hides secrets', !enc.includes('r4hasia!') && !enc.includes('db.example.com') && JSON.parse(enc).encrypted === true);
+  const dec = connio.parseImport({ content: enc, passphrase: 'kunci rahasia' }).items.map((i) => i.conn);
+  check('encrypted → import with passphrase', dec[0].password === 'r4hasia!' && dec[1].file === '/tmp/x.db');
+  let code = '';
+  try { connio.parseImport({ content: enc, passphrase: 'salah' }); } catch (e) { code = e.code; }
+  check('wrong passphrase rejected', code === 'BAD_PASSPHRASE');
+  try { connio.parseImport({ content: enc }); } catch (e) { code = e.code; }
+  check('missing passphrase detected', code === 'NEED_PASSPHRASE');
+
+  const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+<Connections Ver="1.5">
+  <Connection ConnectionName="Server &amp; Prod" ConnType="MYSQL" Host="10.0.0.5" Port="3307" UserName="admin" Password="${connio.navicatEncrypt('pässw0rd')}" Database="erp"
+    SSH="true" SSH_Host="gw.example.com" SSH_Port="2222" SSH_UserName="deploy" SSH_AuthenMethod="PUBLICKEY" SSH_PrivateKey="/home/u/.ssh/id_rsa" SSH_Passphrase="${connio.navicatEncrypt('kp')}"/>
+  <Connection ConnectionName="Analitik" ConnType="POSTGRESQL" Host="pg.local" Port="5432" UserName="postgres" Password="${connio.navicatEncrypt('pg!')}" InitialDatabase="dw"/>
+  <Connection ConnectionName="Kas" ConnType="SQLITE" DatabaseFileName="/data/kas.db"/>
+  <Connection ConnectionName="Ora" ConnType="ORACLE" Host="o"/>
+</Connections>`;
+  const nv = connio.parseImport({ content: ncx });
+  const [m, pg, sl, ora] = nv.items;
+  check('Navicat: source detected', nv.source === 'Navicat' && nv.items.length === 4);
+  check('Navicat: MySQL + password decrypted', m.conn.name === 'Server & Prod' && m.conn.port === 3307 && m.conn.password === 'pässw0rd' && m.conn.database === 'erp');
+  check('Navicat: SSH key + passphrase', m.conn.ssh.auth === 'key' && m.conn.ssh.port === 2222 && m.conn.ssh.passphrase === 'kp' && m.conn.ssh.keyFile === '/home/u/.ssh/id_rsa');
+  check('Navicat: PostgreSQL', pg.conn.type === 'postgres' && pg.conn.password === 'pg!' && pg.conn.database === 'dw');
+  check('Navicat: SQLite', sl.conn.type === 'sqlite' && sl.conn.file === '/data/kas.db');
+  check('Navicat: unsupported engine skipped', ora.skip === true);
+  const old = connio.parseImport({ content: '<Connections Ver="1.1"><Connection ConnectionName="x" ConnType="MYSQL" Host="h" Password="ABCD"/></Connections>' });
+  check('Navicat < 12: warns, no password', old.items[0].conn.password === undefined && old.items[0].warnings.length === 1);
+
+  const ds = { folders: {}, connections: {
+    'mysql8-1': { provider: 'mysql', name: 'Toko', folder: 'Klien/ABC', configuration: { host: 'h1', port: '3306', database: 'shop' } },
+    'pg-1': { provider: 'postgresql', name: 'Gudang', configuration: { host: 'h2', port: '5433', database: 'wh', handlers: { ssh_tunnel: { enabled: true, properties: { host: 'jump', port: '22', authType: 'PASSWORD' } } } } },
+  } };
+  const credsJson = Buffer.from(JSON.stringify({ 'mysql8-1': { '#connection': { user: 'u1', password: 'p1' } }, 'pg-1': { '#connection': { user: 'u2', password: 'p2' }, 'network/ssh_tunnel': { user: 'su', password: 'sp' } } }));
+  const iv = randomBytes(16);
+  const c = createCipheriv('aes-128-cbc', Buffer.from('babb4a9f774ab853c96c2d653dfe544a', 'hex'), iv);
+  const credFile = Buffer.concat([iv, c.update(credsJson), c.final()]).toString('base64');
+  const dv = connio.parseImport({ content: JSON.stringify(ds), credentials: credFile });
+  const [d1, d2] = dv.items.map((i) => i.conn);
+  check('DBeaver: connections + group', dv.source === 'DBeaver' && d1.type === 'mysql' && d1.group === 'ABC' && d1.database === 'shop');
+  check('DBeaver: credentials decrypted', d1.user === 'u1' && d1.password === 'p1' && d2.password === 'p2' && d2.port === 5433);
+  check('DBeaver: SSH tunnel', d2.ssh?.enabled && d2.ssh.host === 'jump' && d2.ssh.user === 'su' && d2.ssh.password === 'sp');
+  check('duplicate detection', connio.sameTarget(conns[0], { ...conns[0], name: 'lain', password: 'x' }) && !connio.sameTarget(conns[0], { ...conns[0], database: 'lain' }));
+}
+
+async function suiteDataSync(a, b) {
+  const tag = `datasync ${a.type}→${b.type}`;
+  const src = await a.make('dss');
+  await seed(src);
+  const dst = await b.make('dsd_' + a.type);
+  const tables = ['kategori', 'produk', 'item'].map((name) => ({ name }));
+  let j = await job((ctx) => runCopy(ctx, { src: src.conn, srcNs: src.ns, dst: dst.conn, dstNs: dst.ns, tables, mode: 'both', dropExisting: true, foreignKeys: true }));
+  if (j.status !== 'done') return check(`${tag}: setup copy`, false, j.error);
+  const D = (sql) => db.raw(dst.conn, sql, [], dst.ns);
+  const T = (t) => Q(dst.conn, dst.ns, t);
+  // drift the target: change a value, remove a row, add a row
+  await D(`UPDATE ${T('produk')} SET harga = 1, nama = 'Diubah' WHERE sku = 'A2'`);
+  await D(`DELETE FROM ${T('item')} WHERE pesanan_id = 2`);
+  await D(`INSERT INTO ${T('kategori')} (id, nama, aktif) VALUES (99, 'Ekstra', ${b.type === 'postgres' ? 'TRUE' : 1})`);
+  j = await job((ctx) => dsCompare(ctx, { src: src.conn, srcNs: src.ns, dst: dst.conn, dstNs: dst.ns, tables }));
+  check(`${tag}: compare`, j.status === 'done', j.error || '');
+  if (j.status !== 'done') return;
+  const by = Object.fromEntries(j.result.tables.map((t) => [t.table, t]));
+  check(`${tag}: same rows recognised`, by.kategori.same === 2 && by.produk.same === 3 && by.item.same === 2, JSON.stringify(j.result.tables.map((t) => [t.table, t.insert, t.update, t.delete, t.same])));
+  check(`${tag}: diff detected`, by.produk.update === 1 && by.item.insert === 1 && by.kategori.delete === 1);
+  const upd = by.produk.samples.update[0];
+  check(`${tag}: changed columns`, upd && upd.changed.map((i) => by.produk.columns[i]).sort().join() === 'harga,nama', JSON.stringify(upd?.changed));
+  const sel = j.result.tables.map((t) => ({ table: t.table, insert: true, update: true, delete: true }));
+  const sc = await job((ctx) => dsScript(ctx, { compareId: j.id, selection: sel }));
+  const sql = sc.file ? readFileSync(sc.file, 'utf8') : '';
+  check(`${tag}: SQL script`, sc.status === 'done' && sc.result.statements === 3 && /UPDATE .*produk/.test(sql) && /DELETE FROM .*kategori/.test(sql), sc.error || '');
+  const ap = await job((ctx) => dsApply(ctx, { compareId: j.id, selection: sel }));
+  check(`${tag}: apply`, ap.status === 'done' && ap.result.applied === 3, ap.error || '');
+  const again = await job((ctx) => dsCompare(ctx, { src: src.conn, srcNs: src.ns, dst: dst.conn, dstNs: dst.ns, tables }));
+  check(`${tag}: in sync after apply`, again.status === 'done' && again.result.tables.every((t) => !t.insert && !t.update && !t.delete), JSON.stringify(again.result?.tables.map((t) => [t.table, t.insert, t.update, t.delete])));
+  await a.drop('dss');
+  await b.drop('dsd_' + a.type);
+}
+
+async function suiteDataGen(E) {
+  const tag = `datagen ${E.type}`;
+  const env = await E.make('gen');
+  await db.raw(env.conn, DDL[env.conn.type], [], env.ns);
+  const plan = await planTable(env.conn, env.ns, 'produk');
+  const g = Object.fromEntries(plan.columns.map((c) => [c.name, c.spec.gen]));
+  check(`${tag}: plan suggestions`, g.id === 'skip' && g.kategori_id === 'fk' && g.harga === 'money' && g.stok === 'int' && g.nama === 'product', JSON.stringify(g));
+  if (E.type === 'mysql') check(`${tag}: ENUM values`, JSON.stringify(plan.columns.find((c) => c.name === 'status').list) === '["aktif","arsip"]');
+  const r = await job((ctx) => runGenerate(ctx, { conn: env.conn, ns: env.ns, seed: 42, tables: [
+    { table: 'item', rows: 300, mode: 'append' },
+    { table: 'kategori', rows: 25, mode: 'append' },
+    { table: 'produk', rows: 200, mode: 'append', columns: { sku: { gen: 'sequence', prefix: 'SKU-', start: 1, width: 5 } } },
+  ] }));
+  check(`${tag}: job`, r.status === 'done', r.error || '');
+  if (r.status !== 'done') return E.drop('gen');
+  const v = async (sql) => Number((await db.raw(env.conn, sql, [], env.ns)).rows[0][0]);
+  const T = (t) => Q(env.conn, env.ns, t);
+  check(`${tag}: parents generated first`, r.result.tables.map((x) => x.table).join() === 'kategori,produk,item');
+  check(`${tag}: row counts`, (await v(`SELECT COUNT(*) FROM ${T('kategori')}`)) === 25 && (await v(`SELECT COUNT(*) FROM ${T('produk')}`)) === 200 && (await v(`SELECT COUNT(*) FROM ${T('item')}`)) === 300);
+  check(`${tag}: FK integrity`, (await v(`SELECT COUNT(*) FROM ${T('produk')} p WHERE p.kategori_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${T('kategori')} k WHERE k.id = p.kategori_id)`)) === 0);
+  check(`${tag}: unique respected`, (await v(`SELECT COUNT(DISTINCT sku) FROM ${T('produk')}`)) === 200 && (await v(`SELECT COUNT(DISTINCT nama) FROM ${T('kategori')}`)) === 25);
+  check(`${tag}: sequence generator`, (await db.raw(env.conn, `SELECT MIN(sku) FROM ${T('produk')}`, [], env.ns)).rows[0][0] === 'SKU-00001');
+  const r2 = await job((ctx) => runGenerate(ctx, { conn: env.conn, ns: env.ns, tables: [{ table: 'kategori', rows: 5, mode: 'append' }] }));
+  check(`${tag}: append keeps unique`, r2.status === 'done' && (await v(`SELECT COUNT(DISTINCT nama) FROM ${T('kategori')}`)) === 30, r2.error || '');
+  const r3 = await job((ctx) => runGenerate(ctx, { conn: env.conn, ns: env.ns, tables: [{ table: 'item', rows: 50, mode: 'replace' }] }));
+  check(`${tag}: replace mode`, r3.status === 'done' && (await v(`SELECT COUNT(*) FROM ${T('item')}`)) === 50, r3.error || '');
+  await E.drop('gen');
+}
+
+async function suiteFindDictBackup(E) {
+  const tag = E.type;
+  const env = await E.make('fdb');
+  await seed(env);
+  let j = await job((ctx) => runFind(ctx, { conn: env.conn, ns: env.ns, term: 'botol' }));
+  const hit = j.result?.results.find((r) => r.table === 'produk');
+  check(`find ${tag}: case-insensitive contains`, j.status === 'done' && hit?.count === 1 && hit.matched.includes('nama'), j.error || JSON.stringify(j.result?.results.map((r) => [r.table, r.count])));
+  j = await job((ctx) => runFind(ctx, { conn: env.conn, ns: env.ns, term: '100%', match: 'contains' }));
+  check(`find ${tag}: LIKE wildcards escaped`, j.status === 'done' && j.result.hits === 0, j.error || '');
+  j = await job((ctx) => runFind(ctx, { conn: env.conn, ns: env.ns, term: 'A1', match: 'exact' }));
+  check(`find ${tag}: exact`, j.status === 'done' && j.result.results.find((r) => r.table === 'produk')?.count === 1);
+
+  const html = await buildDictionary(env.conn, env.ns, {});
+  check(`dictionary ${tag}: html`, html.ext === 'html' && html.content.includes('id="t-produk"') && /FK → kategori\.id/.test(html.content) && html.content.includes('Nama produk') === (E.type !== 'sqlite'));
+  const md = await buildDictionary(env.conn, env.ns, { format: 'md' });
+  check(`dictionary ${tag}: markdown`, md.content.includes('## produk') && md.content.includes('| `sku` |'));
+
+  process.env.DBSTUDIO_DATA_DIR = mkdtempSync(join(tmpdir(), 'dbst-bk-'));
+  const bk = await import('../lib/backup.js');
+  const b = await job((ctx) => bk.runBackup(ctx, { conn: env.conn, ns: env.ns, note: 'uji' }));
+  const list = bk.listBackups(env.conn.id);
+  check(`backup ${tag}: created`, b.status === 'done' && list.length >= 1 && list[0].note === 'uji' && list[0].size > 100, b.error || '');
+  await db.raw(env.conn, `DELETE FROM ${Q(env.conn, env.ns, 'item')}`, [], env.ns);
+  const rs = await job((ctx) => bk.runRestore(ctx, { conn: env.conn, ns: env.ns, backupId: b.result.id }));
+  check(`restore ${tag}`, rs.status === 'done', rs.error || '');
+  if (rs.status === 'done') await verifyData(`restore ${tag}`, env);
+  bk.deleteBackup(env.conn.id, b.result.id);
+  check(`backup ${tag}: delete`, bk.listBackups(env.conn.id).every((x) => x.id !== b.result.id));
+  rmSync(process.env.DBSTUDIO_DATA_DIR, { recursive: true, force: true });
+  delete process.env.DBSTUDIO_DATA_DIR;
+  await E.drop('fdb');
+}
+
+async function suiteXlsx() {
+  console.log('\nExcel');
+  const buf = buildXlsx(['id', 'nama', 'harga', 'catatan'], [[1, 'Kopi & "Teh" <spesial>', '15000.50', null], [2, 'Ünïcødé 🍚', 7, 'baris\nbaru'], [3, '007', true, { a: 1 }]], 'Produk');
+  const f = join(tmpdir(), `dbst_${stamp}.xlsx`);
+  writeFileSync(f, buf);
+  let ok = false;
+  let listing = '';
+  try {
+    listing = execFileSync('unzip', ['-l', f]).toString();
+    execFileSync('unzip', ['-tq', f]);
+    ok = true;
+  } catch (e) {
+    listing = e.message;
+  }
+  check('xlsx: valid zip', ok && listing.includes('xl/worksheets/sheet1.xml'));
+  const sheet = execFileSync('unzip', ['-p', f, 'xl/worksheets/sheet1.xml']).toString();
+  check('xlsx: escaping + numbers', sheet.includes('Kopi &amp; &quot;Teh&quot; &lt;spesial&gt;') && sheet.includes('<v>15000.50</v>') && sheet.includes('t="inlineStr"><is><t xml:space="preserve">007</t>'));
+  rmSync(f, { force: true });
+}
+
+// Language switching: English by default, Indonesian from public/js/locales/id.js once settings say so.
+// Runs in its own data dir so the user's ~/.dbstudio/settings.json is never read or changed.
+async function suiteI18n() {
+  console.log('\nLanguage (i18n)');
+  const prevDir = process.env.DBSTUDIO_DATA_DIR;
+  const dir = mkdtempSync(join(tmpdir(), 'dbst-i18n-'));
+  process.env.DBSTUDIO_DATA_DIR = dir;
+  // Only keys present in the dictionary can be checked strictly (id.js is filled when the fragments are merged).
+  const idOf = (k) => ID[k] ?? k;
+  let started = null;
+  try {
+    check('i18n: default language is en', settings.get().language === 'en' && lang() === 'en' && locale() === 'en-US');
+    check('i18n: English by default', t('Settings') === 'Settings' && t('Job not found') === 'Job not found');
+    check('i18n: placeholders', t('Restore into {name}', { name: 'db1' }) === 'Restore into db1');
+    check('i18n: plural + locale number', plural(1, '{n} row', '{n} rows') === '1 row' && plural(1234, '{n} row', '{n} rows') === '1,234 rows', plural(1234, '{n} row', '{n} rows'));
+    check('i18n: datagen labels in English', generatorList().fullName === 'Full name');
+
+    let threw = false;
+    try { settings.set({ language: 'xx' }); } catch { threw = true; }
+    check('settings: unknown language rejected', threw && settings.get().language === 'en');
+    threw = false;
+    try { settings.set({ theme: 'neon' }); } catch { threw = true; }
+    check('settings: unknown theme rejected', threw);
+
+    // A broken / foreign settings file falls back to the defaults.
+    const other = mkdtempSync(join(tmpdir(), 'dbst-i18n-'));
+    writeFileSync(join(other, 'settings.json'), JSON.stringify({ language: 'fr', theme: 'neon' }));
+    process.env.DBSTUDIO_DATA_DIR = other;
+    check('settings: invalid saved values sanitized', settings.get().language === 'en' && settings.get().theme === null);
+    rmSync(other, { recursive: true, force: true });
+    process.env.DBSTUDIO_DATA_DIR = dir;
+
+    // The HTTP endpoints the UI uses (server on a random loopback port).
+    const { startServer, stopServer } = await import('../server.js');
+    started = await startServer({ port: 0 });
+    const base = `http://127.0.0.1:${started.port}`;
+    const api = (method, path, body) =>
+      fetch(base + path, { method, headers: { 'X-DBStudio': '1', ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const g = await (await api('GET', '/api/settings')).json();
+    check('GET /api/settings defaults to en', g.language === 'en' && g.dataDir === dir, JSON.stringify(g));
+    const bad = await api('POST', '/api/settings', { language: 'xx' });
+    check('POST /api/settings rejects unknown language', bad.status === 400);
+    const ok = await (await api('POST', '/api/settings', { language: 'id' })).json();
+    check('POST /api/settings saves the language', ok.language === 'id' && JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).language === 'id');
+    const page = await (await fetch(base + '/')).text();
+    check('index.html stamped with the saved language', page.includes('<html lang="id"'));
+    const nf = await (await api('GET', '/api/jobs/nope')).json();
+    check('server errors follow the language', nf.error === idOf('Job not found'), nf.error);
+    await stopServer(started.server);
+    started = null;
+
+    check('i18n: language switch applies at once', lang() === 'id' && locale() === 'id-ID');
+    if ('Settings' in ID) check('i18n: Indonesian dictionary (Settings → Pengaturan)', t('Settings') === 'Pengaturan', t('Settings'));
+    else console.log('  (info) locales/id.js has no "Settings" key yet — Indonesian text check skipped');
+    check('i18n: Indonesian placeholders', t('Restore into {name}', { name: 'db1' }) === idOf('Restore into {name}').replace('{name}', 'db1'));
+    check('i18n: Indonesian number format', plural(1234, '{n} row', '{n} rows') === idOf('{n} rows').replace('{n}', '1.234'), plural(1234, '{n} row', '{n} rows'));
+    check('i18n: datagen labels translated when served', generatorList().fullName === idOf('Full name'));
+    let err = null;
+    try { connio.parseImport({ content: connio.exportConnections([{ name: 'x', type: 'sqlite', file: '/x.db' }], { passphrase: 'p' }) }); } catch (e) { err = e; }
+    check('i18n: error codes unchanged, message translated', err?.code === 'NEED_PASSPHRASE' && err.message === idOf('This file is encrypted. Enter the passphrase.'), err?.message);
+    const j = await job(() => { throw new Error('x'); });
+    check('i18n: job phase translated', j.phase === idOf('Failed'), j.phase);
+
+    settings.set({ language: 'en' });
+    check('i18n: back to English', t('Job not found') === 'Job not found' && generatorList().fullName === 'Full name');
+  } finally {
+    if (started) await (await import('../server.js')).stopServer(started.server).catch(() => {});
+    if (prevDir === undefined) delete process.env.DBSTUDIO_DATA_DIR;
+    else process.env.DBSTUDIO_DATA_DIR = prevDir;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- run
 const pick = (name) => !only.length || only.includes(name);
 try {
@@ -361,7 +619,7 @@ try {
     }
   }
   if (pick('copy')) {
-    console.log('\nCopy antar engine');
+    console.log('\nCopy across engines');
     for (const a of engines) {
       for (const b of engines) {
         try {
@@ -373,7 +631,7 @@ try {
     }
   }
   if (pick('dump')) {
-    console.log('\nDump → import antar dialek');
+    console.log('\nDump → import across dialects');
     for (const a of engines) {
       for (const b of engines) {
         try {
@@ -384,9 +642,28 @@ try {
       }
     }
   }
+  if (pick('connio')) await suiteConnio();
+  if (pick('xlsx')) await suiteXlsx();
+  if (pick('datasync')) {
+    console.log('\nData sync across engines');
+    for (const a of engines) for (const b of engines) {
+      try { await suiteDataSync(a, b); } catch (e) { check(`datasync ${a.type}→${b.type}`, false, e.stack); }
+    }
+  }
+  if (pick('datagen')) {
+    console.log('\nData generator');
+    for (const E of engines) { try { await suiteDataGen(E); } catch (e) { check(`datagen ${E.type}`, false, e.stack); } }
+  }
+  if (pick('tools')) {
+    console.log('\nFind, data dictionary, backup & restore');
+    for (const E of engines) { try { await suiteFindDictBackup(E); } catch (e) { check(`tools ${E.type}`, false, e.stack); } }
+  }
+  if (pick('i18n')) {
+    try { await suiteI18n(); } catch (e) { check('i18n suite', false, e.stack); }
+  }
 } finally {
   await db.shutdown();
   for (const f of sqliteFiles) rmSync(f, { force: true });
 }
-console.log(`\n${passes} lulus, ${failures} gagal  (engine: ${engines.map((e) => e.label).join(', ')})`);
+console.log(`\n${passes} passed, ${failures} failed  (engines: ${engines.map((e) => e.label).join(', ')})`);
 process.exit(failures ? 1 : 0);

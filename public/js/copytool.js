@@ -3,6 +3,10 @@ import { h, icon, esc, api, qs, state, app, toast, watchJob, segmented, toggle, 
 import { addTab, activateTab, findTab } from './tabs.js';
 import { namespacesOf, defaultNsFor, connSelect } from './conn.js';
 import { countUp } from './fx.js';
+import { t, plural, LOCALE } from './i18n.js';
+
+// Copy items carry a stable `state` id; `status` is only the translated label.
+const isFinished = (it) => it.state === 'done';
 
 export function progressRing(size = 110) {
   const r = 46;
@@ -18,7 +22,7 @@ export function progressRing(size = 110) {
 }
 
 export async function openCopy({ tables: preselect = null, all = false } = {}) {
-  if (!state.conns.length) return toast('Belum ada koneksi', 'err');
+  if (!state.conns.length) return toast(t('No connections yet'), 'err');
   const prev = findTab((t) => t.kind === 'copy' && !t.running);
   if (prev && !preselect && !all) return activateTab(prev.id);
 
@@ -46,9 +50,9 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
   const dstNsSel = h('select', { class: 'select' });
   srcNsSel.onchange = () => ((st.srcNs = srcNsSel.value), loadSrcTables());
   dstNsSel.onchange = () => ((st.dstNs = dstNsSel.value), loadDstTables());
-  const filter = h('input', { class: 'input sm', placeholder: 'Saring tabel…' });
+  const filter = h('input', { class: 'input sm', placeholder: t('Filter tables…') });
   filter.oninput = () => ((st.filter = filter.value.toLowerCase()), renderPick());
-  const allBox = checkbox('Pilih semua', false, (v) => {
+  const allBox = checkbox(t('Select all'), false, (v) => {
     for (const [n, p] of st.pick) if (!st.filter || n.toLowerCase().includes(st.filter)) p.on = v;
     renderPick();
   });
@@ -56,24 +60,24 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
   const viewList = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } });
   const summary = h('div', { class: 'faint', style: { fontSize: '12px' } });
   const engineNote = h('div', { class: 'notice info', hidden: true });
-  const startBtn = h('button', { class: 'btn primary', html: icon('rocket') + '<span>Mulai salin</span>' });
+  const startBtn = h('button', { class: 'btn primary', html: icon('rocket') + `<span>${t('Start copy')}</span>` });
 
   const srcCard = h(
     'div',
     { class: 'card' },
-    h('div', { class: 'card-title', html: icon('database') + 'Sumber' }),
-    h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', { text: 'Koneksi' }), srcConnSel), h('div', { class: 'field' }, h('label', { class: 'src-ns-label', text: 'Database' }), srcNsSel)),
+    h('div', { class: 'card-title', html: icon('database') + t('Source') }),
+    h('div', { class: 'form-grid' }, h('div', { class: 'field' }, h('label', { text: t('Connection') }), srcConnSel), h('div', { class: 'field' }, h('label', { class: 'src-ns-label', text: t('Database') }), srcNsSel)),
     h('div', { class: 'row', style: { margin: '14px 0 8px' } }, h('div', { class: 'search grow', html: icon('search') }, filter), allBox),
-    h('div', { class: 'tp-row', style: { borderBottom: 0, padding: '0 10px 4px', fontSize: '10.5px', color: 'var(--text-3)', fontFamily: 'var(--sans)', fontWeight: 600, letterSpacing: '.6px', textTransform: 'uppercase', display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) 90px minmax(0,1fr)', gap: '10px' }, html: '<span style="width:16px"></span><span>Tabel</span><span style="text-align:right">Baris</span><span>Nama di tujuan</span>' }),
+    h('div', { class: 'tp-row', style: { borderBottom: 0, padding: '0 10px 4px', fontSize: '10.5px', color: 'var(--text-3)', fontFamily: 'var(--sans)', fontWeight: 600, letterSpacing: '.6px', textTransform: 'uppercase', display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) 90px minmax(0,1fr)', gap: '10px' }, html: `<span style="width:16px"></span><span>${t('Table')}</span><span style="text-align:right">${t('Rows')}</span><span>${t('Name in destination')}</span>` }),
     pickList,
-    h('div', { class: 'section-label', style: { margin: '14px 0 8px' }, text: 'View (opsional)' }),
+    h('div', { class: 'section-label', style: { margin: '14px 0 8px' }, text: t('Views (optional)') }),
     viewList,
   );
   const modeSeg = segmented(
     [
-      { value: 'both', label: 'Struktur + data', icon: 'layers' },
-      { value: 'structure', label: 'Struktur', icon: 'table-properties' },
-      { value: 'data', label: 'Data saja', icon: 'rows-3' },
+      { value: 'both', label: t('Structure + data'), icon: 'layers' },
+      { value: 'structure', label: t('Structure'), icon: 'table-properties' },
+      { value: 'data', label: t('Data only'), icon: 'rows-3' },
     ],
     st.mode,
     (v) => ((st.mode = v), renderSummary()),
@@ -81,19 +85,19 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
   const dstCard = h(
     'div',
     { class: 'card' },
-    h('div', { class: 'card-title', html: icon('database-backup') + 'Tujuan' }),
+    h('div', { class: 'card-title', html: icon('database-backup') + t('Destination') }),
     h(
       'div',
       { class: 'form-grid' },
-      h('div', { class: 'field' }, h('label', { text: 'Koneksi' }), dstConnSel),
-      h('div', { class: 'field' }, h('label', { class: 'dst-ns-label', text: 'Database' }), h('div', { class: 'row' }, dstNsSel, h('button', { class: 'btn icon', title: 'Buat baru', html: icon('folder-plus'), onclick: () => app.createNamespace({ connId: st.dstId, onCreated: (n) => ((st.dstNs = n), loadDst(true)) }) }))),
+      h('div', { class: 'field' }, h('label', { text: t('Connection') }), dstConnSel),
+      h('div', { class: 'field' }, h('label', { class: 'dst-ns-label', text: t('Database') }), h('div', { class: 'row' }, dstNsSel, h('button', { class: 'btn icon', title: t('Create new'), html: icon('folder-plus'), onclick: () => app.createNamespace({ connId: st.dstId, onCreated: (n) => ((st.dstNs = n), loadDst(true)) }) }))),
     ),
-    h('div', { class: 'field', style: { marginTop: '14px' } }, h('label', { text: 'Yang disalin' }), modeSeg),
+    h('div', { class: 'field', style: { marginTop: '14px' } }, h('label', { text: t('What to copy') }), modeSeg),
     h(
       'div',
       { style: { display: 'flex', flexDirection: 'column', gap: '10px', margin: '14px 0' } },
-      toggle('Hapus tabel yang sudah ada di tujuan (DROP)', st.drop, (v) => ((st.drop = v), renderPick(), renderSummary())),
-      toggle('Salin relasi (foreign key)', st.fks, (v) => (st.fks = v)),
+      toggle(t('Drop tables that already exist in the destination (DROP)'), st.drop, (v) => ((st.drop = v), renderPick(), renderSummary())),
+      toggle(t('Copy relations (foreign keys)'), st.fks, (v) => (st.fks = v)),
     ),
     engineNote,
     h('div', { class: 'row', style: { marginTop: '14px' } }, summary, h('span', { class: 'spacer' }), startBtn),
@@ -111,13 +115,13 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
     h(
       'div',
       { class: 'scroll-pad' },
-      h('div', { class: 'row', style: { marginBottom: '14px' } }, h('div', { html: `<div style="font:700 22px var(--display)">Salin tabel</div><div class="faint">Ke database lain, server lain, bahkan engine lain — struktur, data, dan relasinya.</div>` })),
+      h('div', { class: 'row', style: { marginBottom: '14px' } }, h('div', { html: `<div style="font:700 22px var(--display)">${t('Copy tables')}</div><div class="faint">${t('To another database, another server, even another engine — structure, data and relations.')}</div>` })),
       h('div', { class: 'two-col' }, srcCard, dstCard),
       progCard,
     ),
   );
 
-  const tab = { kind: 'copy', icon: 'copy-plus', title: 'Salin tabel', panel, running: false, isDirty: () => tab.running };
+  const tab = { kind: 'copy', icon: 'copy-plus', title: t('Copy tables'), panel, running: false, isDirty: () => tab.running };
   addTab(tab);
 
   // ---------------------------------------------------------------- loading
@@ -141,7 +145,7 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
       panel.querySelector('.src-ns-label').textContent = nsLabel(connById(st.srcId).type);
       await loadSrcTables();
     } catch (e) {
-      toast(e.message, 'err', { title: 'Sumber' });
+      toast(e.message, 'err', { title: t('Source') });
     }
   }
   async function loadSrcTables() {
@@ -164,7 +168,7 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
       panel.querySelector('.dst-ns-label').textContent = nsLabel(connById(st.dstId).type);
       await loadDstTables();
     } catch (e) {
-      toast(e.message, 'err', { title: 'Tujuan' });
+      toast(e.message, 'err', { title: t('Destination') });
     }
   }
   async function loadDstTables() {
@@ -177,11 +181,11 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
   function renderPick() {
     pickList.innerHTML = '';
     const rows = [...st.pick].filter(([n]) => !st.filter || n.toLowerCase().includes(st.filter));
-    if (!rows.length) pickList.append(h('div', { class: 'empty', text: st.tables.length ? 'Tidak ada yang cocok' : 'Tidak ada tabel' }));
+    if (!rows.length) pickList.append(h('div', { class: 'empty', text: st.tables.length ? t('No matches') : t('No tables') }));
     rows.forEach(([name, p], i) => {
       const target = h('input', { class: 'input sm mono', value: p.target });
       target.oninput = () => ((p.target = target.value.trim() || name), renderSummary(), mark());
-      const warn = h('span', { class: 'chip warn', style: { marginLeft: '6px' }, html: icon('triangle-alert') + 'ada' });
+      const warn = h('span', { class: 'chip warn', style: { marginLeft: '6px' }, html: icon('triangle-alert') + t('exists') });
       const mark = () => (warn.hidden = !(p.on && st.dstTables.has(p.target) && st.mode !== 'data' && !st.drop));
       mark();
       const cb = checkbox('', p.on, (v) => ((p.on = v), mark(), renderSummary()));
@@ -191,7 +195,7 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
   }
   function renderViews() {
     viewList.innerHTML = '';
-    if (!st.views.length) viewList.append(h('span', { class: 'faint', text: 'Tidak ada view' }));
+    if (!st.views.length) viewList.append(h('span', { class: 'faint', text: t('No views') }));
     for (const v of st.views) viewList.append(h('div', { class: 'chip', style: { height: '28px' } }, checkbox(v.name, st.pickViews.has(v.name), (on) => (on ? st.pickViews.add(v.name) : st.pickViews.delete(v.name)))));
   }
   function renderSummary() {
@@ -200,11 +204,11 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
     const dst = connById(st.dstId);
     const known = chosen.filter((p) => p.rows != null);
     const rows = known.reduce((s, p) => s + (Number(p.rows) || 0), 0);
-    summary.innerHTML = `<b>${chosen.length}</b> tabel dipilih${known.length ? ` · ±${fmtNum(rows)} baris` : ''}`;
+    summary.innerHTML = plural(chosen.length, '<b>{n}</b> table selected', '<b>{n}</b> tables selected') + (known.length ? ' · ' + plural(rows, '±{n} row', '±{n} rows') : '');
     startBtn.disabled = !chosen.length || tab.running;
     if (src && dst && src.type !== dst.type) {
       engineNote.hidden = false;
-      engineNote.innerHTML = `${icon('shuffle')}<div>${engineBadge(src.type, true)} ${TYPE_LABEL[src.type]} → ${engineBadge(dst.type, true)} ${TYPE_LABEL[dst.type]}: tipe kolom, default, boolean, JSON & BLOB dikonversi otomatis. Index berbasis ekspresi dan trigger tidak ikut.</div>`;
+      engineNote.innerHTML = `${icon('shuffle')}<div>${t('{from} → {to}: column types, defaults, booleans, JSON & BLOB are converted automatically. Expression-based indexes and triggers are not copied.', { from: `${engineBadge(src.type, true)} ${TYPE_LABEL[src.type]}`, to: `${engineBadge(dst.type, true)} ${TYPE_LABEL[dst.type]}` })}</div>`;
     } else engineNote.hidden = true;
   }
 
@@ -216,10 +220,10 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
     startBtn.disabled = true;
     progCard.hidden = false;
     progCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    progTitle.textContent = `${tables.length} tabel → ${connById(st.dstId).name}${connById(st.dstId).type !== 'sqlite' ? ' / ' + st.dstNs : ''}`;
+    progTitle.textContent = plural(tables.length, '{n} table → {target}', '{n} tables → {target}', { target: `${connById(st.dstId).name}${connById(st.dstId).type !== 'sqlite' ? ' / ' + st.dstNs : ''}` });
     progActions.innerHTML = '';
     let jobId;
-    const cancel = h('button', { class: 'btn sm', html: icon('square') + '<span>Batalkan</span>', onclick: () => jobId && api('POST', `/api/jobs/${jobId}/cancel`) });
+    const cancel = h('button', { class: 'btn sm', html: icon('square') + `<span>${t('Cancel')}</span>`, onclick: () => jobId && api('POST', `/api/jobs/${jobId}/cancel`) });
     progActions.append(cancel);
     const bars = new Map();
     try {
@@ -237,25 +241,26 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
             bars.set(it.key, { bar, label });
           }
           const b = bars.get(it.key);
-          const p = it.rows ? Math.min(1, (it.done || 0) / it.rows) : it.status === 'selesai' ? 1 : 0;
-          b.bar.firstChild.style.setProperty('--p', (it.status === 'selesai' ? 100 : p * 100) + '%');
-          b.bar.classList.toggle('done', it.status === 'selesai');
+          const p = it.rows ? Math.min(1, (it.done || 0) / it.rows) : isFinished(it) ? 1 : 0;
+          b.bar.firstChild.style.setProperty('--p', (isFinished(it) ? 100 : p * 100) + '%');
+          b.bar.classList.toggle('done', isFinished(it));
           b.label.textContent = it.rows ? `${fmtNum(it.done || 0)} / ${fmtNum(it.rows)}` : it.status || '';
         }
-        log.innerHTML = j.log.map((l) => `<div class="${l.level}"><span class="t">${new Date(l.t).toLocaleTimeString('id-ID')}</span>${esc(l.msg)}</div>`).join('');
+        log.innerHTML = j.log.map((l) => `<div class="${l.level}"><span class="t">${new Date(l.t).toLocaleTimeString(LOCALE)}</span>${esc(l.msg)}</div>`).join('');
         log.scrollTop = log.scrollHeight;
       });
       cancel.remove();
       if (final.status === 'done') {
-        toast(`${final.result.tables} tabel · ${fmtNum(final.result.rows)} baris`, 'ok', { title: 'Salin selesai' });
+        toast(`${plural(final.result.tables, '{n} table', '{n} tables')} · ${plural(final.result.rows, '{n} row', '{n} rows')}`, 'ok', { title: t('Copy complete') });
         const big = h('b', { class: 'count-up' });
         progPhase.innerHTML = '';
-        progPhase.append(h('span', { html: `${icon('circle-check')} Selesai — ` }), big, ' baris disalin');
+        const [before, after = ''] = t('Done — {n} rows copied').split('{n}');
+        progPhase.append(h('span', { html: `${icon('circle-check')} ${esc(before)}` }), big, after);
         countUp(big, final.result.rows);
         progActions.append(
           h('button', {
             class: 'btn sm primary',
-            html: icon('arrow-right') + '<span>Buka tujuan</span>',
+            html: icon('arrow-right') + `<span>${t('Open destination')}</span>`,
             onclick: async () => {
               await app.connect(st.dstId);
               if (state.active?.conn.id === st.dstId && state.active.ns !== st.dstNs && connById(st.dstId).type !== 'sqlite') await app.setNamespace(st.dstNs);
@@ -265,11 +270,11 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
         if (state.active?.conn.id === st.dstId && (state.active.ns === st.dstNs || connById(st.dstId).type === 'sqlite')) app.loadTree();
         loadDstTables();
       } else {
-        toast(final.error || 'Dibatalkan', final.status === 'cancelled' ? 'info' : 'err', { title: final.status === 'cancelled' ? 'Dibatalkan' : 'Salin gagal' });
+        toast(final.error || t('Cancelled'), final.status === 'cancelled' ? 'info' : 'err', { title: final.status === 'cancelled' ? t('Cancelled') : t('Copy failed') });
         ring.querySelector('.fg').style.stroke = 'var(--danger)';
       }
     } catch (e) {
-      toast(e.message, 'err', { title: 'Salin gagal' });
+      toast(e.message, 'err', { title: t('Copy failed') });
     } finally {
       tab.running = false;
       renderSummary();
@@ -290,16 +295,16 @@ export async function openCopy({ tables: preselect = null, all = false } = {}) {
 // Duplicate a table inside the current database.
 export async function duplicateTable(name) {
   const a = state.active;
-  const newName = await (await import('./core.js')).promptDialog({ title: 'Duplikat tabel', label: 'Nama tabel baru', value: `${name}_copy`, icon: 'copy' });
+  const newName = await (await import('./core.js')).promptDialog({ title: t('Duplicate table'), label: t('New table name'), value: `${name}_copy`, icon: 'copy' });
   if (!newName) return;
   const job = await api('POST', '/api/jobs/copy', { srcId: a.conn.id, srcNs: a.ns, dstId: a.conn.id, dstNs: a.ns, tables: [{ name, targetName: newName }], mode: 'both', foreignKeys: true });
-  toast(`Menduplikat ${name} → ${newName}…`);
+  toast(t('Duplicating {name} → {newName}…', { name, newName }));
   const j = await watchJob(job);
   if (j.status === 'done') {
-    toast(`${fmtNum(j.result.rows)} baris`, 'ok', { title: `${newName} dibuat` });
+    toast(plural(j.result.rows, '{n} row', '{n} rows'), 'ok', { title: t('{name} created', { name: newName }) });
     await app.loadTree();
     app.openTableTab(newName);
-  } else toast(j.error, 'err', { title: 'Duplikat gagal' });
+  } else toast(j.error, 'err', { title: t('Duplicate failed') });
 }
 
 Object.assign(app, { openCopy, duplicateTable });
