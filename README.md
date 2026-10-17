@@ -180,16 +180,55 @@ build/               app icons
 
 ---
 
-Developed by **Firman Santosa** — [sifirman.com](https://sifirman.com) · admin@sifirman.com
+<h2 align="center">🤝 Support My Work</h2>
 
-Released under the [MIT License](LICENSE).
-
-<br>
-
-<h3 align="center">🤝 Support My Work</h3>
+<p align="center">
+  DBStudio is <b>free and open source</b>, built and maintained in my own time.<br>
+  If it saves you hours at work — or rescues a late-night deploy — you can help keep it growing.
+</p>
 
 <p align="center">
   <a href="https://buymeacoffee.com/firexsantos"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee"></a>
   &nbsp;
   <a href="https://paypal.me/firexserv"><img src="https://img.shields.io/badge/PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white" alt="PayPal"></a>
+  &nbsp;
+  <a href="https://github.com/firexsantos/dbstudio"><img src="https://img.shields.io/badge/Star%20on%20GitHub-8b5cff?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub"></a>
+</p>
+
+<p align="center"><sub>Every coffee, big or small, one-time or recurring, genuinely makes a difference — thank you! 🙏</sub></p>
+
+<br>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+#### ☕ Where your support goes
+
+- **Development time** — new features, fixes and faster releases
+- **Real-world testing** across MySQL, MariaDB, PostgreSQL and SQLite versions
+- **A code-signing certificate**, so Windows stops showing the SmartScreen warning
+- **Keeping it free** — no paywall, no account, no telemetry
+
+</td>
+<td width="50%" valign="top">
+
+#### 💜 Other ways to help — free
+
+- ⭐ **Star** the repository so more people can find it
+- 🐛 **Report a bug** or **suggest a feature** in [Issues](https://github.com/firexsantos/dbstudio/issues)
+- 🌍 **Translate** the interface into your language — see [Translations](#translations)
+- 📣 **Share** DBStudio with your team or community
+
+</td>
+</tr>
+</table>
+
+---
+
+<p align="center">
+  <img src="build/icons/128x128.png" width="44" alt="DBStudio"><br>
+  <b>DBStudio</b> — crafted with care by <a href="https://sifirman.com"><b>Firman Santosa</b></a><br>
+  <a href="https://sifirman.com">sifirman.com</a> &nbsp;·&nbsp; <a href="mailto:admin@sifirman.com">admin@sifirman.com</a> &nbsp;·&nbsp; <a href="https://github.com/firexsantos">@firexsantos</a><br>
+  <sub>Released under the <a href="LICENSE">MIT License</a> · © 2026 Firman Santosa</sub>
 </p>
