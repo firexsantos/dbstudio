@@ -166,20 +166,32 @@ export function statementRanges(text) {
 // ---------------------------------------------------------------- state & events
 export const state = {
   conns: [],
-  active: null, // { conn, namespaces, label, ns, version, flavor }
-  tables: [],
-  objects: { routines: [], triggers: [], events: [] },
-  columns: {},
+  // Every open connection is a workspace with its own explorer, database/schema and tabs:
+  // { wid, conn, namespaces, label, ns, version, flavor, tables, columns, objects, activeTab }
+  workspaces: [],
+  ws: null, // wid of the workspace on screen
   tabs: [],
   activeTab: null,
   seq: 0,
   jobs: new Map(),
 };
+// `active`, `tables`, `columns` and `objects` always describe the workspace on screen, so the many modules that read
+// them keep working unchanged while each workspace keeps its own copy.
+const EMPTY_OBJECTS = { routines: [], triggers: [], events: [] };
+export const wsById = (wid) => state.workspaces.find((w) => w.wid === wid) || null;
+Object.defineProperties(state, {
+  active: { get: () => wsById(state.ws), enumerable: true },
+  tables: { get: () => wsById(state.ws)?.tables || [], set: (v) => { const w = wsById(state.ws); if (w) w.tables = v; } },
+  columns: { get: () => wsById(state.ws)?.columns || {}, set: (v) => { const w = wsById(state.ws); if (w) w.columns = v; } },
+  objects: { get: () => wsById(state.ws)?.objects || EMPTY_OBJECTS, set: (v) => { const w = wsById(state.ws); if (w) w.objects = v; } },
+});
 export const app = {}; // cross-module function registry
 const bus = new EventTarget();
 export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { detail }));
 export const on = (name, fn) => bus.addEventListener(name, (e) => fn(e.detail));
 export const currentTab = () => state.tabs.find((x) => x.id === state.activeTab);
+/** Tabs that belong to the workspace on screen. */
+export const wsTabs = () => state.tabs.filter((x) => x.ws === state.ws);
 export const connById = (id) => state.conns.find((c) => c.id === id);
 
 // ---------------------------------------------------------------- API

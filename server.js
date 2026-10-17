@@ -163,7 +163,10 @@ app.post(
     const namespaces = await db.listNamespaces(conn);
     store.patch(conn.id, { lastUsed: Date.now() });
     const info = await db.serverInfo(conn).catch(() => ({ version: null, flavor: conn.type }));
-    const defaultNs = conn.type === 'postgres' ? (namespaces.includes('public') ? 'public' : namespaces[0]) : conn.database || namespaces[0];
+    // Without a configured database, open the first user database rather than a system one.
+    const SYSTEM = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
+    const defaultNs =
+      conn.type === 'postgres' ? (namespaces.includes('public') ? 'public' : namespaces[0]) : conn.database || namespaces.find((n) => !SYSTEM.has(n)) || namespaces[0];
     return { namespaces, label: db.NAMESPACE_LABEL[conn.type], defaultNs, version: info.version, flavor: info.flavor };
   }),
 );

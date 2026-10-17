@@ -1,6 +1,6 @@
 // Query tabs: editor, run / run current / explain / format, results grid, history & favorites.
 import {
-  $, h, icon, esc, api, state, app, on, local, toast, modal, promptDialog, copyText, debounce, clamp, fmtNum,
+  $, h, icon, esc, api, state, app, on, local, wsById, toast, modal, promptDialog, copyText, debounce, clamp, fmtNum,
   statementRanges, createEditor, CM_MODE, TYPE_LABEL, downloadText, timeAgo, segmented,
 } from './core.js';
 import { addTab, activateTab, renderTabs } from './tabs.js';
@@ -14,7 +14,7 @@ import { t, plural } from './i18n.js';
 const saveTabs = debounce(() => {
   local.set(
     'dbs-queries',
-    state.tabs.filter((x) => x.kind === 'query' && x.cm).map((x) => ({ title: x.title, sql: x.cm.getValue() })),
+    state.tabs.filter((x) => x.kind === 'query' && x.cm).map((x) => ({ title: x.title, sql: x.cm.getValue(), ws: x.ws })),
   );
 }, 300);
 on('tabs-changed', saveTabs);
@@ -28,7 +28,7 @@ function nextQueryNo() {
   return m + 1;
 }
 
-export function newQueryTab(sql = '', runNow = false, title = null, { activate = true } = {}) {
+export function newQueryTab(sql = '', runNow = false, title = null, { activate = true, ws } = {}) {
   const panel = h('div');
   const ctx = h('span', { class: 'ctx-pill' });
   const btn = (act, ico, label, tip, kind = '') => h('button', { class: `btn sm ${kind}`, 'data-act': act, title: tip, html: icon(ico) + (label ? `<span>${label}</span>` : '') });
@@ -52,6 +52,7 @@ export function newQueryTab(sql = '', runNow = false, title = null, { activate =
   panel.append(toolbar, editorWrap, split, results);
 
   const tab = {
+    ws, // undefined → the workspace on screen
     kind: 'query',
     icon: 'square-terminal',
     title: title || `Query ${nextQueryNo()}`,
@@ -63,6 +64,7 @@ export function newQueryTab(sql = '', runNow = false, title = null, { activate =
       tab.cm?.refresh();
       tab.cm?.focus();
       updateCtx(tab);
+      tab.cm?.setOption('hintOptions', { tables: wsOf(tab)?.columns || {}, completeSingle: false });
     },
     onClose: () => setTimeout(saveTabs),
     rename: async () => {
@@ -138,16 +140,20 @@ function emptyResult() {
   return h('div', { class: 'empty', style: { flex: 1 } }, h('div', { html: icon('sparkles') }), h('div', { html: t('Write SQL, then press <kbd>Ctrl</kbd> + <kbd>Enter</kbd>') }));
 }
 
+// The connection a query tab runs against: its own workspace.
+const wsOf = (tab) => wsById(tab.ws) || state.active;
+
 function updateCtx(tab) {
-  const a = state.active;
+  const a = wsOf(tab);
   tab.ctx.innerHTML = a
     ? `${icon('database')} ${esc(a.conn.name)}${a.conn.type !== 'sqlite' ? ' / ' + esc(a.ns) : ''}`
     : `${icon('unplug')} ${t('not connected')}`;
   tab.cm?.setOption('mode', CM_MODE[a?.conn.type || 'mysql']);
 }
-on('connected', () => state.tabs.filter((x) => x.kind === 'query').forEach(updateCtx));
-on('ns', () => state.tabs.filter((x) => x.kind === 'query').forEach(updateCtx));
-on('tree', () => state.tabs.filter((x) => x.kind === 'query').forEach((x) => x.cm?.setOption('hintOptions', { tables: state.columns, completeSingle: false })));
+const mine = () => state.tabs.filter((x) => x.kind === 'query' && x.ws === state.ws);
+on('connected', () => mine().forEach(updateCtx));
+on('ns', () => mine().forEach(updateCtx));
+on('tree', () => mine().forEach((x) => x.cm?.setOption('hintOptions', { tables: state.columns, completeSingle: false })));
 
 function setExportEnabled(tab) {
   const has = Boolean(tab.result?.columns?.length);
@@ -181,7 +187,7 @@ function sortedRows(tab) {
 }
 
 export async function runQuery(tab, mode) {
-  const a = state.active;
+  const a = wsOf(tab);
   if (!a) {
     toast(t('Pick a connection in the left panel first.'), 'err', { title: t('Not connected') });
     app.showPanel('connections');
@@ -372,7 +378,8 @@ export function openHistory(tab) {
 
 export function restoreQueryTabs() {
   const saved = local.get('dbs-queries', []);
-  saved.forEach((q, i) => newQueryTab(q.sql, false, q.title, { activate: i === 0 }));
+  // Tabs go back to their workspace once it reconnects; until then (or if it can't) they are adopted by another.
+  saved.forEach((q) => newQueryTab(q.sql, false, q.title, { activate: false, ws: q.ws ?? null }));
 }
 
 Object.assign(app, { newQueryTab, runQuery });

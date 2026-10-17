@@ -24,6 +24,7 @@ import './backupui.js';
 import './qbuilder.js';
 import { maybeShowWhatsNew } from './whatsnew.js';
 import './settings.js';
+import './workspaces.js';
 import { t, plural, translateDom } from './i18n.js';
 
 // Three tilted elliptical orbits, each with a glowing satellite travelling along it.
@@ -106,6 +107,7 @@ function renderStatus() {
     ${a?.conn.ssh?.enabled ? `<span class="sb-item">${icon('shield-check')} SSH ${esc(a.conn.ssh.host)}</span>` : ''}
     ${tab?.table ? `<span class="sb-item">${icon('table-2')} ${esc(tab.table)}</span>` : ''}
     <span class="spacer"></span>
+    ${state.workspaces.length > 1 ? `<span class="sb-item">${icon('layers')} ${plural(state.workspaces.length, '{n} connection open', '{n} connections open')}</span>` : ''}
     ${jobs.length ? `<span class="sb-item" style="color:var(--a2)">${icon('loader-circle', 'spin')} ${plural(jobs.length, '{n} job running', '{n} jobs running')} · ${Math.round((jobs[0].progress || 0) * 100)}%</span>` : ''}
     <span class="sb-item"><kbd>Ctrl</kbd><kbd>K</kbd> ${t('command palette')}</span>`;
 }
@@ -144,6 +146,13 @@ addEventListener('keydown', (e) => {
   } else if (mod && e.key.toLowerCase() === 's') {
     e.preventDefault();
     currentTab()?.onSave?.();
+  } else if (e.altKey && !mod && /^[1-9]$/.test(e.key) && state.workspaces[Number(e.key) - 1]) {
+    // Alt+1…9: jump to that connection tab
+    e.preventDefault();
+    app.switchWorkspace(state.workspaces[Number(e.key) - 1].wid);
+  } else if (mod && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    e.preventDefault();
+    app.cycleWorkspace(e.key === 'ArrowRight' ? 1 : -1);
   } else if (mod && e.key === ',') {
     e.preventDefault();
     app.openSettings();
@@ -160,7 +169,7 @@ addEventListener('beforeunload', (e) => {
 });
 
 on('conns', renderWelcome);
-for (const ev of ['connected', 'ns', 'tab', 'jobs']) on(ev, renderStatus);
+for (const ev of ['connected', 'ns', 'tab', 'jobs', 'ws']) on(ev, renderStatus);
 setInterval(renderStatus, 1500);
 
 (async function boot() {
@@ -178,8 +187,7 @@ setInterval(renderStatus, 1500);
   }
   restoreQueryTabs();
   renderTabs();
-  const last = local.get('dbs-last-conn', null);
-  if (last && state.conns.some((c) => c.id === last)) app.connect(last, { silent: true });
+  app.restoreWorkspaces(); // reconnects in the background; slow servers (SSH) must not hold up the UI
   setTimeout(() => $('#app').classList.remove('intro'), 1400);
   setTimeout(maybeShowWhatsNew, 1600);
 })();

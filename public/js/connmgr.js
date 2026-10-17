@@ -202,6 +202,7 @@ export function initConnPanel() {
   });
   on('conns', renderConnections);
   on('connected', renderConnections);
+  on('ws', renderConnections);
   on('connect-failed', renderConnections);
 }
 
@@ -346,9 +347,9 @@ export function openImportDialog() {
     { class: 'dropzone' },
     h('div', { html: icon('file-input') }),
     h('div', { html: t('<b>Choose a connection file</b> — or drop it here') }),
-    h('div', { class: 'formats' }, ...['DBStudio .json', 'Navicat .ncx', 'DBeaver data-sources.json'].map((f) => h('span', { class: 'chip', text: f }))),
+    h('div', { class: 'formats' }, ...['DBStudio .json', 'Navicat .ncx', 'SQLyog .sycs', 'DBeaver data-sources.json'].map((f) => h('span', { class: 'chip', text: f }))),
   );
-  const input = h('input', { type: 'file', accept: '.json,.ncx,.xml', hidden: true });
+  const input = h('input', { type: 'file', accept: '.json,.ncx,.xml,.sycs,.ini', hidden: true });
   zone.append(input);
   const credRow = h(
     'div',
@@ -450,7 +451,7 @@ export function openImportDialog() {
 
   const m = modal({
     title: t('Import connections'),
-    sub: t('From DBStudio, Navicat or DBeaver'),
+    sub: t('From DBStudio, Navicat, SQLyog or DBeaver'),
     icon: 'download',
     size: 'wide',
     body,

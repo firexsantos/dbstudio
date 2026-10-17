@@ -412,6 +412,33 @@ async function suiteConnio() {
   check('DBeaver: connections + group', dv.source === 'DBeaver' && d1.type === 'mysql' && d1.group === 'ABC' && d1.database === 'shop');
   check('DBeaver: credentials decrypted', d1.user === 'u1' && d1.password === 'p1' && d2.password === 'p2' && d2.port === 5433);
   check('DBeaver: SSH tunnel', d2.ssh?.enabled && d2.ssh.host === 'jump' && d2.ssh.user === 'su' && d2.ssh.password === 'sp');
+
+  // SQLyog .sycs (fake hosts/passwords; encoded the way SQLyog stores them)
+  const E = connio.sqlyogEncode;
+  const sycs = [
+    '[Connection 1]', 'Name=Kantor Pusat', 'Host=db.example.com', 'User=admin', 'StorePassword=1', `Password=${E('p@ss Wörd#1')}`,
+    'Port=3307', 'Database=toko;arsip', 'SSH=0', `SshPwd=${E('ignored')}`, 'SslChecked=1', 'CA=C:\\certs\\ca.pem', 'ObjectbrowserBkcolor=255',
+    '[Connection 2]', 'Name=Lewat SSH', 'Host=localhost', 'User=root', 'StorePassword=1', `Password=${E('dbpw')}`, 'Port=3306', 'Database=',
+    'SSH=1', 'SshUser=ubuntu', `SshPwd=${E('sshpw')}`, 'SshHost=bastion.example.com', 'SshPort=2222', 'SshPasswordRadio=1', 'SshPrivateRadio=0',
+    'SshSavePassword=1', 'Tunnel=1', 'ObjectbrowserBkcolor=16777215',
+    '[Connection 3]', 'Name=Kunci', 'Host=127.0.0.1', 'User=u', 'StorePassword=0', 'Password=', 'SSH=1', 'SshUser=k', 'SshHost=h',
+    'SshPrivateRadio=1', 'SSHPrivateKeyPath=C:\\Users\\me\\.ssh\\id_rsa',
+  ].join('\r\n');
+  check('SQLyog: password encoding round-trips', connio.sqlyogDecode(E('p@ss Wörd#1')) === 'p@ss Wörd#1');
+  const sy = connio.parseImport({ content: sycs, filename: 'koneksi.sycs' });
+  const [y1, y2, y3] = sy.items.map((i) => i.conn);
+  check('SQLyog: detected, 3 connections', sy.source === 'SQLyog' && sy.items.length === 3);
+  check('SQLyog: host/port/user/password', y1.type === 'mysql' && y1.host === 'db.example.com' && y1.port === 3307 && y1.user === 'admin' && y1.password === 'p@ss Wörd#1');
+  check('SQLyog: first listed database, SSL, color', y1.database === 'toko' && y1.ssl === true && y1.color === '#ff0000' && !y1.ssh);
+  check('SQLyog: warnings for database list + SSL files', sy.items[0].warnings.length === 2);
+  check('SQLyog: SSH tunnel with password', y2.ssh?.enabled && y2.ssh.host === 'bastion.example.com' && y2.ssh.port === 2222 && y2.ssh.user === 'ubuntu' && y2.ssh.password === 'sshpw' && y2.password === 'dbpw');
+  check('SQLyog: HTTP tunnel warning, default color ignored', sy.items[1].warnings.length === 1 && !y2.color);
+  check('SQLyog: SSH key auth + Windows path warning, no password', y3.ssh?.auth === 'key' && y3.ssh.keyFile.endsWith('id_rsa') && !y3.password && sy.items[2].warnings.length === 1);
+  const utf16 = Buffer.from('\uFEFF' + sycs, 'utf16le').toString('utf8');
+  check('SQLyog: UTF-16 export is read too', connio.parseImport({ content: utf16 }).items.length === 3);
+  let badErr = '';
+  try { connio.parseImport({ content: '[Connection 1]\nHost=x\nStorePassword=1\nPassword=@@@' }); } catch (e) { badErr = e.message; }
+  check('SQLyog: undecodable password is skipped, not imported as garbage', !badErr);
   check('duplicate detection', connio.sameTarget(conns[0], { ...conns[0], name: 'lain', password: 'x' }) && !connio.sameTarget(conns[0], { ...conns[0], database: 'lain' }));
 }
 

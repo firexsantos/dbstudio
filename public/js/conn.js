@@ -1,6 +1,6 @@
 // Connections: saved list, connect/disconnect, and the connection dialog (with SSH tunnel).
 import {
-  $, h, icon, esc, api, state, app, emit, local, toast, modal, confirmDialog, connById, segmented, toggle, field, select,
+  $, h, icon, esc, api, state, app, emit, local, toast, wsTabs, modal, confirmDialog, connById, segmented, toggle, field, select,
   TYPE_LABEL, DEFAULT_PORT, COLORS, engineBadge,
 } from './core.js';
 import { closeTab } from './tabs.js';
@@ -16,41 +16,36 @@ export function connSub(c) {
   return `${c.user ? c.user + '@' : ''}${c.host || '127.0.0.1'}:${c.port || DEFAULT_PORT[c.type]}`;
 }
 
-export async function connect(id, { silent = false } = {}) {
+/**
+ * Open a connection. It gets its own workspace (big tab) next to the ones already open; if it is already open
+ * the existing workspace comes forward unless `fresh` asks for another one (e.g. a second database on that server).
+ */
+export async function connect(id, { silent = false, fresh = false, ns } = {}) {
   const conn = connById(id);
   if (!conn) return;
-  if (state.active?.conn.id === id) {
-    app.showPanel('explorer');
-    return;
+  if (!fresh) {
+    const open = state.workspaces.find((w) => w.conn.id === id && (ns == null || w.ns === ns));
+    if (open) {
+      app.switchWorkspace(open.wid);
+      app.showPanel('explorer');
+      return open;
+    }
   }
-  emit('connecting', id);
   try {
-    const info = await api('POST', `/api/c/${id}/connect`);
-    state.active = { conn, ...info, ns: info.namespaces.includes(info.defaultNs) ? info.defaultNs : info.namespaces[0] };
-    state.tables = [];
-    state.columns = {};
-    local.set('dbs-last-conn', id);
-    emit('connected', id);
+    const w = await app.openWorkspace(id, { ns });
     app.showPanel('explorer');
-    await app.loadTree();
-    if (!state.tabs.length) app.newQueryTab();
-    if (!silent) toast(`${TYPE_LABEL[conn.type]} ${info.version ? '· ' + String(info.version).split(' ')[0] : ''}`, 'ok', { title: t('Connected to {name}', { name: conn.name }) });
+    if (!wsTabs().length) app.newQueryTab();
+    if (!silent) toast(`${TYPE_LABEL[conn.type]} ${w.version ? '· ' + String(w.version).split(' ')[0] : ''}`, 'ok', { title: t('Connected to {name}', { name: conn.name }) });
+    return w;
   } catch (e) {
     emit('connect-failed', id);
     toast(e.message, 'err', { title: t('Could not connect to {name}', { name: conn.name }) });
   }
 }
 
-export async function disconnect() {
-  if (!state.active) return;
-  const id = state.active.conn.id;
-  state.active = null;
-  state.tables = [];
-  state.columns = {};
-  state.objects = { routines: [], triggers: [], events: [] };
-  local.set('dbs-last-conn', null);
-  emit('connected', null);
-  api('POST', `/api/c/${id}/disconnect`).catch(() => {});
+/** Close a workspace (the one on screen by default). */
+export function disconnect(wid = state.ws) {
+  return app.closeWorkspace(wid);
 }
 
 export async function deleteConn(c) {
@@ -61,7 +56,7 @@ export async function deleteConn(c) {
     confirmLabel: t('Delete connection'),
   });
   if (!ok) return;
-  if (state.active?.conn.id === c.id) await disconnect();
+  for (const w of state.workspaces.filter((x) => x.conn.id === c.id)) if (!(await app.closeWorkspace(w.wid))) return;
   for (const tab of [...state.tabs]) if (tab.connId === c.id) await closeTab(tab.id, true);
   await api('DELETE', `/api/connections/${c.id}`);
   await loadConns();

@@ -1,9 +1,11 @@
 // Tab manager: query, table, designer, ERD and tool tabs all live here.
-import { $, h, icon, state, emit, currentTab, showMenu, confirmDialog, esc } from './core.js';
+import { $, h, icon, state, app, emit, currentTab, wsTabs, showMenu, confirmDialog, esc } from './core.js';
 import { t } from './i18n.js';
 
 export function addTab(tab, { activate = true } = {}) {
   tab.id = ++state.seq;
+  // A tab lives in the workspace (open connection) it was created in.
+  if (tab.ws === undefined) tab.ws = state.ws;
   tab.panel.classList.add('tab-panel');
   tab.fresh = true;
   state.tabs.push(tab);
@@ -17,6 +19,9 @@ export function addTab(tab, { activate = true } = {}) {
 }
 
 export function activateTab(id) {
+  const target = state.tabs.find((x) => x.id === id);
+  // Activating a tab of another workspace (palette, job links…) brings that workspace on screen first.
+  if (target && target.ws !== state.ws && app.switchWorkspace) return app.switchWorkspace(target.ws, { tabId: id });
   const changed = state.activeTab !== id;
   state.activeTab = id;
   for (const x of state.tabs) x.panel.hidden = x.id !== id;
@@ -49,11 +54,14 @@ export async function closeTab(id, force = false) {
     });
     if (!ok) return false;
   }
+  // Neighbours within the same workspace take over when the active tab closes.
+  const siblings = state.tabs.filter((x) => x.ws === tab.ws);
+  const j = siblings.indexOf(tab);
   tab.onClose?.();
   tab.panel.remove();
   state.tabs.splice(i, 1);
   if (state.activeTab === id) {
-    const n = state.tabs[i] || state.tabs[i - 1];
+    const n = siblings[j + 1] || siblings[j - 1];
     state.activeTab = n?.id ?? null;
     if (n) activateTab(n.id);
   }
@@ -66,7 +74,8 @@ export async function closeTab(id, force = false) {
 export function renderTabs() {
   const box = $('#tabs');
   box.innerHTML = '';
-  for (const tab of state.tabs) {
+  const visible = wsTabs();
+  for (const tab of visible) {
     const el = h(
       'div',
       {
@@ -90,12 +99,12 @@ export function renderTabs() {
       showMenu(e, [
         tab.rename ? { label: t('Rename…'), icon: 'pencil', action: () => tab.rename() } : null,
         { label: t('Close'), icon: 'x', action: () => closeTab(tab.id) },
-        { label: t('Close other tabs'), icon: 'copy-x', action: async () => { for (const x of state.tabs.filter((x) => x.id !== tab.id)) await closeTab(x.id); } },
-        { label: t('Close all'), icon: 'circle-x', action: async () => { for (const x of [...state.tabs]) await closeTab(x.id); } },
+        { label: t('Close other tabs'), icon: 'copy-x', action: async () => { for (const x of wsTabs().filter((x) => x.id !== tab.id)) await closeTab(x.id); } },
+        { label: t('Close all'), icon: 'circle-x', action: async () => { for (const x of wsTabs()) await closeTab(x.id); } },
       ]);
     box.append(el);
   }
-  $('#welcome').hidden = state.tabs.length > 0;
+  $('#welcome').hidden = visible.length > 0;
   requestAnimationFrame(moveIndicator);
 }
 

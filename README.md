@@ -59,7 +59,8 @@ choose **More info → Run anyway**. Verify downloads with `SHA256SUMS.txt`.
 | **Schema compare** | Compare two databases/schemas (same engine) and sync the target |
 | **Server** | Process list + kill · variables · status · **users & privileges** (create, change password, GRANT/REVOKE, drop) |
 | **Connection manager** | Groups/folders · favorites · search · drag & drop · sort by name or last used |
-| **Import / export connections** | DBStudio JSON (optionally passphrase-encrypted) · import from **Navicat** (`.ncx`) and **DBeaver** · duplicate detection |
+| **Multiple connections** | Keep several connections open at once, each in its own tab with its own explorer and tabs — even two databases of the same server side by side |
+| **Import / export connections** | DBStudio JSON (optionally passphrase-encrypted) · import from **Navicat** (`.ncx`), **SQLyog** (`.sycs`) and **DBeaver** · duplicate detection |
 | **Data sync** | Compare table **contents** row by row across databases, servers and engines · apply in transactions or save the SQL script |
 | **Test data generator** | Realistic data that respects types, `UNIQUE`, `ENUM`/`CHECK` lists and foreign keys · append or replace · live preview |
 | **Query Builder** | Visual: add tables, joins from foreign keys, columns, aggregates, filters, `GROUP BY`/`HAVING`, sort — no SQL typing needed |
@@ -117,6 +118,7 @@ ssh -L 8080:localhost:5174 user@server     # then open http://localhost:8080
 | `Ctrl+Shift+F` | Format SQL |
 | `Ctrl+S` | Save changes (table data / designer) |
 | `Alt+N` | New query tab |
+| `Alt+1` … `Alt+9` · `Ctrl+Alt+←/→` | Jump to / cycle through open connections |
 | `Ctrl+,` | Settings (language, theme) |
 | `Space` | Open the value viewer for the selected cell |
 | `Ctrl+click` | Follow a foreign key to the referenced row |
@@ -160,7 +162,7 @@ lib/schema.js        schema introspection, CREATE/ALTER, cross-engine type mappi
 lib/copy.js          copy tables across databases/servers/engines
 lib/transfer.js      SQL dumps, CSV/JSON export, SQL import
 lib/jobs.js          background jobs with progress
-lib/connio.js        connection import/export (DBStudio, Navicat, DBeaver)
+lib/connio.js        connection import/export (DBStudio, Navicat, SQLyog, DBeaver)
 lib/datasync.js      row-level data compare & sync
 lib/datagen.js       test data generator
 lib/finder.js        find a value across a whole database
@@ -169,7 +171,7 @@ lib/backup.js        backup & restore history
 lib/xlsx.js          dependency-free Excel writer
 lib/settings.js      preferences (~/.dbstudio/settings.json)
 lib/i18n.js          server-side translations
-public/js/*.js       UI (ES modules, no build step)
+public/js/*.js       UI (ES modules, no build step); workspaces.js = one tab per open connection
 public/js/locales/   translations (English is the source text; id.js = Indonesian)
 public/css/app.css   "Nebula Glass" design system
 electron/main.mjs    desktop app (Electron)

@@ -5,7 +5,7 @@ import {
 } from './core.js';
 import { LOGO, stagger, switchTheme } from './fx.js';
 import { connSub } from './conn.js';
-import { t } from './i18n.js';
+import { t, plural } from './i18n.js';
 
 let panel = local.get('dbs-panel', 'connections');
 const collapsed = new Set(local.get('dbs-tree-collapsed', ['events']));
@@ -67,9 +67,10 @@ function moveRailIndicator(btn) {
 // ---------------------------------------------------------------- connections panel
 export function connCard(c, { compact = false } = {}) {
   const active = state.active?.conn.id === c.id;
+  const open = state.workspaces.filter((w) => w.conn.id === c.id);
   const card = h(
     'div',
-    { class: 'conn-card' + (active ? ' active' : ''), 'data-id': c.id, title: `${TYPE_LABEL[c.type]} — ${connSub(c)}` },
+    { class: 'conn-card' + (active ? ' active' : '') + (open.length && !active ? ' open' : ''), 'data-id': c.id, title: `${TYPE_LABEL[c.type]} — ${connSub(c)}` },
     h('span', { class: 'cc-tag', style: { background: c.color || 'var(--text-3)' } }),
     h('span', { html: engineBadge(c.type) }),
     h(
@@ -78,7 +79,7 @@ export function connCard(c, { compact = false } = {}) {
       h('div', { class: 'cc-name', text: c.name || t('(untitled)') }),
       h('div', { class: 'cc-sub', html: (c.ssh?.enabled ? icon('shield-check') : '') + esc(connSub(c)) }),
     ),
-    active ? h('span', { class: 'pulse on' }) : null,
+    open.length ? h('span', { class: 'pulse on', title: plural(open.length, 'Open in {n} tab', 'Open in {n} tabs') }) : null,
     compact
       ? null
       : h(
@@ -93,13 +94,14 @@ export function connCard(c, { compact = false } = {}) {
   card.oncontextmenu = (e) =>
     showMenu(e, [
       { label: c.name, header: true },
-      { label: t('Connect'), icon: 'zap', action: () => app.connect(c.id) },
+      { label: open.length ? t('Go to this connection') : t('Connect'), icon: 'zap', action: () => app.connect(c.id) },
+      open.length ? { label: t('Open again in a new tab'), icon: 'copy-plus', action: () => app.connect(c.id, { fresh: true }) } : null,
       { label: 'Edit…', icon: 'settings-2', action: () => app.openConnDialog(c) },
       { label: t('Duplicate'), icon: 'copy', action: () => app.duplicateConn(c) },
       { label: c.favorite ? t('Remove from favorites') : t('Add to favorites'), icon: 'star', action: () => app.toggleFavorite(c) },
       { label: t('Move to group…'), icon: 'folder-input', action: () => app.groupPicker(e, [c]) },
       { label: t('Export this connection…'), icon: 'upload', action: () => app.openExportDialog({ ids: [c.id] }) },
-      active ? { label: t('Disconnect'), icon: 'unplug', action: () => app.disconnect() } : null,
+      ...open.map((w) => ({ label: open.length > 1 ? t('Close {ns}', { ns: w.ns }) : t('Disconnect'), icon: 'unplug', action: () => app.disconnect(w.wid) })),
       '-',
       { label: t('Delete connection'), icon: 'trash-2', danger: true, action: () => app.deleteConn(c) },
     ]);
@@ -116,11 +118,11 @@ function markConnecting(id) {
 }
 
 // ---------------------------------------------------------------- explorer
-export async function loadTree() {
-  const a = state.active;
+/** Load the object tree of a workspace (the one on screen by default); only the visible one is re-rendered. */
+export async function loadTree(a = state.active) {
   if (!a) return renderExplorer();
-  state.treeLoading = true;
-  renderExplorer();
+  a.loading = true;
+  if (a === state.active) renderExplorer();
   try {
     const p = qs({ ns: a.ns });
     const [tables, cols, objects] = await Promise.all([
@@ -128,15 +130,15 @@ export async function loadTree() {
       api('GET', `/api/c/${a.conn.id}/all-columns${p}`).catch(() => ({})),
       api('GET', `/api/c/${a.conn.id}/objects${p}`).catch(() => ({ routines: [], triggers: [], events: [] })),
     ]);
-    if (state.active !== a) return;
-    state.tables = tables;
-    state.columns = cols;
-    state.objects = objects;
+    a.tables = tables;
+    a.columns = cols;
+    a.objects = objects;
   } catch (e) {
-    toast(e.message, 'err', { title: t('Could not load objects') });
+    toast(e.message, 'err', { title: t('Could not load objects from {name}', { name: a.conn.name }) });
   } finally {
-    state.treeLoading = false;
+    a.loading = false;
   }
+  if (a !== state.active) return;
   renderExplorer();
   emit('tree');
 }
@@ -223,6 +225,7 @@ function nsMenu(e) {
   const pg = a.conn.type === 'postgres';
   showMenu(e, [
     { label: a.ns, header: true },
+    { label: pg ? t('Open another schema in a new tab…') : t('Open another database in a new tab…'), icon: 'copy-plus', action: () => app.nsPicker(e, a) },
     { label: pg ? t('New schema…') : t('New database…'), icon: 'folder-plus', action: () => app.createNamespace() },
     { label: t('New table…'), icon: 'table-properties', action: () => app.openDesigner(null) },
     { label: t('View ERD'), icon: 'workflow', action: () => app.openTool('erd') },
@@ -270,7 +273,7 @@ function section(key, title, ico, items, renderItem, headActs = []) {
 function renderTree(box) {
   box.innerHTML = '';
   const a = state.active;
-  if (state.treeLoading) {
+  if (a?.loading) {
     for (let i = 0; i < 9; i++) box.append(h('div', { class: 'skeleton', style: { height: '18px', margin: '8px 10px', width: `${55 + ((i * 37) % 40)}%` } }));
     return;
   }

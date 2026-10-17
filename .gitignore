@@ -4,3 +4,8 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Connection exports may contain passwords — never commit them
+*.sycs
+*.ncx
+*.dbstudio-connections*.json

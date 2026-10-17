@@ -3,6 +3,27 @@
 All notable changes to DBStudio are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-10-17
+
+### Added
+
+- **Connection workspaces** — several connections open at the same time, each in its own big tab above the explorer,
+  with its own explorer, database/schema and tabs. Switching never disconnects the others.
+  - Open the same server twice to work in **two databases/schemas side by side** ("Open another database in a new tab").
+  - Each tab shows the connection's color, engine and database; drag to reorder, middle-click or × to close.
+  - `Alt+1…9` jumps to a connection, `Ctrl+Alt+←/→` cycles; the command palette lists open connections.
+  - Open connections and their query tabs are restored after a restart.
+  - Closing a connection asks first when its tabs have unsaved changes or SQL.
+
+- **Import connections from SQLyog** (`.sycs` from *Tools → Export Connections*): host, port, user, default database,
+  SSL, SSH tunnel (password or key) and the object-browser color. Saved passwords — database and SSH — are restored.
+  UTF-16 exports are read as well; HTTP tunnels and Windows key paths are flagged in the preview.
+
+### Changed
+
+- Clicking another connection now opens it next to the current one instead of replacing it.
+- MySQL/MariaDB connections without a default database open the first user database instead of `information_schema`.
+
 ## [0.3.0] — 2026-10-17
 
 A big feature release inspired by Navicat, plus a bilingual interface.
@@ -62,5 +83,6 @@ First public release.
 - Server tools: process list, variables, status, users & privileges.
 - Desktop app for Linux (`.deb`, AppImage) and Windows (installer), with an About page.
 
+[0.4.0]: https://github.com/firexsantos/dbstudio/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/firexsantos/dbstudio/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/firexsantos/dbstudio/releases/tag/v0.2.0

@@ -4,6 +4,16 @@ import { t } from './i18n.js';
 
 export const RELEASES = [
   {
+    version: '0.4.0',
+    title: t('Several connections at once'),
+    items: [
+      ['layers', t('A tab for every connection'), t('Keep several connections open side by side, each with its own explorer, database and tabs — switching never disconnects.')],
+      ['copy-plus', t('Two databases of one server'), t('Right-click a connection tab → "Open another database in a new tab" to work in both at the same time.')],
+      ['keyboard', t('Quick switching'), t('Alt+1…9 jumps to a connection, Ctrl+Alt+←/→ cycles; open connections come back after a restart.')],
+      ['download', t('Import from SQLyog'), t('Bring in your SQLyog connections (.sycs) — including saved passwords, SSH tunnels and colors.')],
+    ],
+  },
+  {
     version: '0.3.0',
     title: t('Professional, Navicat-style features'),
     items: [
