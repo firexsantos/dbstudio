@@ -4,6 +4,15 @@ import { t } from './i18n.js';
 
 export const RELEASES = [
   {
+    version: '0.5.0',
+    title: t('Always up to date'),
+    items: [
+      ['rocket', t('Update in one click'), t('DBStudio tells you when a new version is out and installs it for you — download, checksum check, install and restart.')],
+      ['shield-check', t('Verified downloads'), t('Every installer is checked against the release checksum before it is installed.')],
+      ['bell-ring', t('Never miss a release'), t('The update reminder returns on every start until you upgrade; a chip in the status bar keeps it one click away.')],
+    ],
+  },
+  {
     version: '0.4.0',
     title: t('Several connections at once'),
     items: [

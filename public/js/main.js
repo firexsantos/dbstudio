@@ -25,6 +25,7 @@ import './qbuilder.js';
 import { maybeShowWhatsNew } from './whatsnew.js';
 import './settings.js';
 import './workspaces.js';
+import './updater.js';
 import { t, plural, translateDom } from './i18n.js';
 
 // Three tilted elliptical orbits, each with a glowing satellite travelling along it.
@@ -107,6 +108,7 @@ function renderStatus() {
     ${a?.conn.ssh?.enabled ? `<span class="sb-item">${icon('shield-check')} SSH ${esc(a.conn.ssh.host)}</span>` : ''}
     ${tab?.table ? `<span class="sb-item">${icon('table-2')} ${esc(tab.table)}</span>` : ''}
     <span class="spacer"></span>
+    ${state.update?.available ? `<button class="sb-item sb-update" data-act="update">${icon('rocket')} ${esc(t('Update {v} available', { v: state.update.latest }))}</button>` : ''}
     ${state.workspaces.length > 1 ? `<span class="sb-item">${icon('layers')} ${plural(state.workspaces.length, '{n} connection open', '{n} connections open')}</span>` : ''}
     ${jobs.length ? `<span class="sb-item" style="color:var(--a2)">${icon('loader-circle', 'spin')} ${plural(jobs.length, '{n} job running', '{n} jobs running')} · ${Math.round((jobs[0].progress || 0) * 100)}%</span>` : ''}
     <span class="sb-item"><kbd>Ctrl</kbd><kbd>K</kbd> ${t('command palette')}</span>`;
@@ -169,7 +171,8 @@ addEventListener('beforeunload', (e) => {
 });
 
 on('conns', renderWelcome);
-for (const ev of ['connected', 'ns', 'tab', 'jobs', 'ws']) on(ev, renderStatus);
+for (const ev of ['connected', 'ns', 'tab', 'jobs', 'ws', 'update']) on(ev, renderStatus);
+$('#statusbar').addEventListener('click', (e) => e.target.closest('[data-act="update"]') && app.openUpdate());
 setInterval(renderStatus, 1500);
 
 (async function boot() {
@@ -190,4 +193,6 @@ setInterval(renderStatus, 1500);
   app.restoreWorkspaces(); // reconnects in the background; slow servers (SSH) must not hold up the UI
   setTimeout(() => $('#app').classList.remove('intro'), 1400);
   setTimeout(maybeShowWhatsNew, 1600);
+  // Every start: look for a newer release (shown again on each start until DBStudio is updated).
+  setTimeout(() => app.checkForUpdates({ auto: true }), 2400);
 })();

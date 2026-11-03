@@ -70,6 +70,7 @@ choose **More info → Run anyway**. Verify downloads with `SHA256SUMS.txt`.
 | **Export formats** | **Excel (.xlsx)**, CSV, JSON, Markdown, HTML, SQL `INSERT` — from query results and tables |
 | **Data dictionary** | Shareable HTML / Markdown documentation of a whole schema |
 | **Backup & restore** | One-click compressed backups with history, restore and download |
+| **Updates** | Checks for a new release on every start · one-click upgrade (download → SHA-256 check → install → restart) for `.deb`, AppImage and Windows |
 | **More** | Command palette `Ctrl+K` · **English / Indonesian** interface · dark/light theme · every schema change goes through an editable **SQL preview** |
 
 ## Running from source
@@ -130,6 +131,7 @@ ssh -L 8080:localhost:5174 user@server     # then open http://localhost:8080
 - The server only listens on `127.0.0.1`; any Host other than `localhost`/`127.0.0.1` is rejected (DNS-rebinding protection).
 - Every API request must carry the `X-DBStudio` header (CSRF protection against other websites). Export downloads use a random per-job token.
 - A strict Content-Security-Policy only allows scripts, styles and fonts from the app itself.
+- Updates: on start the app asks the GitHub Releases API for the latest version (a plain request, no personal data). Installers are only downloaded from GitHub and are installed only after their SHA-256 matches the release's `SHA256SUMS.txt`.
 - Connections are stored in `~/.dbstudio/connections.json` (mode 600). Database and SSH passwords are never sent back to the browser.
 
 ## Self-test
@@ -170,6 +172,7 @@ lib/dictionary.js    data dictionary (HTML / Markdown)
 lib/backup.js        backup & restore history
 lib/xlsx.js          dependency-free Excel writer
 lib/settings.js      preferences (~/.dbstudio/settings.json)
+lib/updater.js       update check, verified download and self-install
 lib/i18n.js          server-side translations
 public/js/*.js       UI (ES modules, no build step); workspaces.js = one tab per open connection
 public/js/locales/   translations (English is the source text; id.js = Indonesian)

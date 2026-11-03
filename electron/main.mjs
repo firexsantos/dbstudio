@@ -148,6 +148,15 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   try {
     prepareDemo();
+    // Hooks the in-process updater (lib/updater.js) uses to finish an upgrade.
+    globalThis.__dbstudioDesktop = {
+      relaunch(execPath) {
+        app.relaunch(execPath ? { execPath } : undefined);
+        app.exit(0);
+      },
+      quit: () => app.quit(),
+      openPath: (p) => shell.openPath(p),
+    };
     const { startServer } = await import('../server.js');
     // A fixed port keeps the page origin stable, so localStorage (query tabs, history, favorites) survives restarts.
     // If it is taken (e.g. by another program), fall back to any free port.

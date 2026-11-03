@@ -1370,3 +1370,43 @@ table.qb-grid { width: 100%; border-collapse: separate; border-spacing: 0 4px; }
 
 /* invalid input (e.g. a column type the designer cannot use) */
 .input.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent); }
+
+/* ================================================================ updates */
+.modal.upd-modal { width: min(720px, calc(100vw - 32px)); }
+.upd-body { display: grid; gap: 14px; }
+/* installed → new: two version capsules joined by a beam with light travelling along it */
+.upd-hero { display: grid; grid-template-columns: auto minmax(60px, 1fr) auto; align-items: center; gap: 14px; padding: 18px 20px; border-radius: var(--r-lg); background: var(--grad-soft); border: 1px solid var(--line-2); position: relative; overflow: hidden; }
+.upd-ver { display: grid; gap: 2px; padding: 10px 16px; border-radius: 14px; background: var(--glass-2); border: 1px solid var(--line-2); text-align: center; animation: st-rise 0.6s var(--spring) both; }
+.upd-ver span { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+.upd-ver b { font: 700 22px var(--display); }
+.upd-ver.old b { color: var(--text-2); }
+.upd-ver.new { animation-delay: 0.18s; border-color: transparent; background: linear-gradient(var(--solid), var(--solid)) padding-box, var(--grad) border-box; border: 1.5px solid transparent; box-shadow: 0 10px 34px -12px rgba(54, 214, 255, 0.6); }
+.upd-ver.new b { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.upd-beam { position: relative; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--line-3), var(--a2), var(--a3)); }
+.upd-beam i { position: absolute; top: -3px; left: 0; width: 8px; height: 8px; border-radius: 50%; background: #fff; box-shadow: 0 0 12px var(--a2), 0 0 4px #fff; animation: upd-travel 2.2s var(--ease) infinite; opacity: 0; }
+.upd-beam i:nth-child(2) { animation-delay: 0.7s; }
+.upd-beam i:nth-child(3) { animation-delay: 1.4s; }
+@keyframes upd-travel { 0% { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { left: calc(100% - 8px); opacity: 0; } }
+.upd-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; }
+.upd-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.upd-meta svg.i { width: 13px; height: 13px; }
+.upd-notes { max-height: 260px; overflow: auto; padding: 4px 16px 10px; border-radius: var(--r); background: var(--glass-2); border: 1px solid var(--line); font-size: 13px; line-height: 1.55; }
+.upd-notes h4 { margin: 12px 0 4px; font: 600 13px var(--display); color: var(--a2); }
+.upd-notes ul { margin: 4px 0; padding-left: 18px; }
+.upd-notes li { margin: 4px 0; }
+.upd-notes code { font: 12px var(--mono); padding: 1px 5px; border-radius: 5px; background: var(--hover); }
+.upd-work { display: flex; align-items: center; gap: 16px; padding: 12px 14px; border-radius: var(--r-lg); background: var(--glass-2); border: 1px solid var(--line-2); animation: st-rise 0.45s var(--spring) both; }
+.upd-work .ring { width: 64px; height: 64px; }
+.upd-phase { font-weight: 600; }
+.upd-hint { font-size: 12px; margin-top: 2px; }
+.upd-done .upd-work { border-color: color-mix(in srgb, var(--ok) 50%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 15%, transparent); }
+/* status bar chip + glowing dot on the settings gear while an update waits */
+#statusbar .sb-update { border: 0; cursor: pointer; font: inherit; padding: 2px 10px; border-radius: 999px; color: #070912; background: var(--grad); font-weight: 600; animation: upd-pulse 2.4s ease-in-out infinite; }
+#statusbar .sb-update svg.i { width: 12px; height: 12px; }
+@keyframes upd-pulse { 50% { box-shadow: 0 0 0 4px rgba(54, 214, 255, 0.18), 0 0 16px rgba(54, 214, 255, 0.45); } }
+#btn-settings.has-update::after { content: ''; position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--a3); box-shadow: 0 0 0 3px var(--solid), 0 0 10px var(--a3); animation: upd-pulse 2.4s ease-in-out infinite; }
+.st-upd-status { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
+.st-upd-status svg.i { width: 15px; height: 15px; color: var(--ok); }
+.st-upd-status.avail { color: var(--text); }
+.st-upd-status.avail svg.i { color: var(--a2); }
+@media (prefers-reduced-motion: reduce) { .upd-beam i, #statusbar .sb-update, #btn-settings.has-update::after { animation: none; } .upd-beam i { opacity: 1; left: calc(50% - 4px); } }

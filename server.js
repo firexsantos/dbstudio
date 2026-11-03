@@ -23,6 +23,7 @@ import { buildDictionary } from './lib/dictionary.js';
 import { listBackups, runBackup, runRestore, deleteBackup, exportBackup } from './lib/backup.js';
 import { buildXlsx } from './lib/xlsx.js';
 import * as settings from './lib/settings.js';
+import * as updater from './lib/updater.js';
 import { t, plural } from './lib/i18n.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -184,6 +185,13 @@ app.get(
     platform: `${platform() === 'linux' ? 'Linux' : platform()} ${release().split('-')[0]}`,
   })),
 );
+
+// ---------- updates ----------
+// DBSTUDIO_PRETEND_VERSION lets a developer see the update flow without installing an old build.
+const runningVersion = () => process.env.DBSTUDIO_PRETEND_VERSION || PKG.version;
+app.get('/api/update/check', route((req) => updater.checkForUpdate(runningVersion(), { force: req.query.force === '1' })));
+app.post('/api/jobs/update/download', route(() => jobs.publicJob(jobs.createJob('update', t('Download update'), (ctx) => updater.runDownload(ctx, runningVersion())))));
+app.post('/api/update/install', route(() => updater.installUpdate()));
 
 // ---------- preferences ----------
 app.get('/api/settings', route(() => ({ ...settings.get(), dataDir: settings.dataDir() })));

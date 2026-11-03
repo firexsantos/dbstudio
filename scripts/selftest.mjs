@@ -9,7 +9,7 @@
 // Your existing data is never touched.
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync, existsSync } from 'node:fs';
 import * as db from '../lib/drivers.js';
 import * as schema from '../lib/schema.js';
 import { createJob, getJob } from '../lib/jobs.js';
@@ -27,6 +27,9 @@ import { createCipheriv, randomBytes } from 'node:crypto';
 import * as settings from '../lib/settings.js';
 import { t, plural, lang, locale } from '../lib/i18n.js';
 import ID from '../public/js/locales/id.js';
+import * as updater from '../lib/updater.js';
+import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 
 const stamp = Date.now().toString(36);
 let failures = 0;
@@ -582,6 +585,82 @@ async function suiteXlsx() {
 
 // Language switching: English by default, Indonesian from public/js/locales/id.js once settings say so.
 // Runs in its own data dir so the user's ~/.dbstudio/settings.json is never read or changed.
+async function suiteUpdater() {
+  console.log('\nUpdates');
+  check('version compare', updater.compareVersions('0.4.10', '0.4.9') === 1 && updater.compareVersions('v0.5.0', '0.5.0') === 0 && updater.compareVersions('0.4.2', '0.10.0') === -1);
+  const names = ['DBStudio-1.0.0-amd64.deb', 'DBStudio-1.0.0-x86_64.AppImage', 'DBStudio-Setup-1.0.0.exe', 'SHA256SUMS.txt'].map((name) => ({ name }));
+  check('asset per install kind', updater.pickAsset(names, 'deb', 'x64')?.name.endsWith('.deb') && updater.pickAsset(names, 'appimage', 'x64')?.name.endsWith('.AppImage') && updater.pickAsset(names, 'exe')?.name.endsWith('.exe') && updater.pickAsset(names, null) === null);
+  check('install kind', updater.installKind({}, 'linux', true) === 'deb' && updater.installKind({ APPIMAGE: '/x' }, 'linux', true) === 'appimage' && updater.installKind({}, 'win32', true) === 'exe' && updater.installKind({}, 'linux', false) === null);
+  check('SHA256SUMS parsing', updater.parseSums(`${'a'.repeat(64)}  DBStudio-1.0.0-amd64.deb\n${'b'.repeat(64)} *x.exe`)['x.exe'] === 'b'.repeat(64));
+
+  // A local stand-in for the GitHub API + release downloads.
+  const tmp = mkdtempSync(join(tmpdir(), 'dbst-upd-'));
+  const payload = Buffer.from('#!/bin/sh\necho new AppImage\n'.repeat(2000));
+  const sum = createHash('sha256').update(payload).digest('hex');
+  let sums = `${sum}  DBStudio-9.9.9-x86_64.AppImage\n`;
+  let assetHost = null;
+  const srv = createServer((req, res) => {
+    const base = `http://${req.headers.host}`;
+    if (req.url === '/latest') {
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({
+        tag_name: 'v9.9.9', name: 'DBStudio 9.9.9', body: '### Fixed\n\n- Something', html_url: base + '/page', published_at: '2026-11-03T00:00:00Z',
+        assets: [
+          { name: 'DBStudio-9.9.9-x86_64.AppImage', size: payload.length, browser_download_url: (assetHost || base) + '/app' },
+          { name: 'SHA256SUMS.txt', size: sums.length, browser_download_url: base + '/sums' },
+        ],
+      }));
+    }
+    if (req.url === '/app') return res.end(payload);
+    if (req.url === '/sums') return res.end(sums);
+    res.statusCode = 404;
+    res.end();
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const prevEnv = { url: process.env.DBSTUDIO_UPDATE_URL, img: process.env.APPIMAGE, dir: process.env.DBSTUDIO_DATA_DIR };
+  process.env.DBSTUDIO_UPDATE_URL = `http://127.0.0.1:${srv.address().port}/latest`;
+  process.env.DBSTUDIO_DATA_DIR = tmp;
+  const target = join(tmp, 'DBStudio.AppImage');
+  writeFileSync(target, 'old');
+  process.env.APPIMAGE = target;
+  let relaunched = null;
+  globalThis.__dbstudioDesktop = { relaunch: (p) => (relaunched = p || true), quit() {}, openPath: async () => '' };
+  const job = (fn) => new Promise((resolve) => {
+    const j = createJob('update', 'test', fn);
+    const tick = () => (j.status === 'running' ? setTimeout(tick, 20) : resolve(j));
+    tick();
+  });
+  try {
+    updater.resetUpdateCache();
+    const info = await updater.checkForUpdate('0.4.2');
+    check('newer release detected', info.available && info.latest === '9.9.9' && info.kind === 'appimage' && info.canInstall && info.asset.name.endsWith('.AppImage'));
+    check('same version → nothing to do', !(await updater.checkForUpdate('9.9.9', { force: true })).available);
+    updater.resetUpdateCache();
+    const ok = await job((ctx) => updater.runDownload(ctx, '0.4.2'));
+    check('download + checksum verified', ok.status === 'done' && readFileSync(join(tmp, 'updates', 'DBStudio-9.9.9-x86_64.AppImage')).equals(payload), ok.error);
+    const inst = await updater.installUpdate();
+    await new Promise((r) => setTimeout(r, 700));
+    check('AppImage replaced + relaunch', inst.next === 'restart' && readFileSync(target).equals(payload) && relaunched === target);
+
+    updater.resetUpdateCache();
+    sums = `${'0'.repeat(64)}  DBStudio-9.9.9-x86_64.AppImage\n`;
+    const bad = await job((ctx) => updater.runDownload(ctx, '0.4.2'));
+    check('damaged download rejected', bad.status === 'error' && /checksum/i.test(bad.error) && !existsSync(join(tmp, 'updates', 'DBStudio-9.9.9-x86_64.AppImage.part')), bad.error);
+
+    updater.resetUpdateCache();
+    sums = `${sum}  DBStudio-9.9.9-x86_64.AppImage\n`;
+    assetHost = 'http://evil.example';
+    const evil = await job((ctx) => updater.runDownload(ctx, '0.4.2'));
+    check('download from a foreign host refused', evil.status === 'error' && /unexpected address/i.test(evil.error), evil.error);
+  } finally {
+    srv.close();
+    delete globalThis.__dbstudioDesktop;
+    for (const [k, v] of [['DBSTUDIO_UPDATE_URL', prevEnv.url], ['APPIMAGE', prevEnv.img], ['DBSTUDIO_DATA_DIR', prevEnv.dir]]) v == null ? delete process.env[k] : (process.env[k] = v);
+    updater.resetUpdateCache();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 async function suiteI18n() {
   console.log('\nLanguage (i18n)');
   const prevDir = process.env.DBSTUDIO_DATA_DIR;
@@ -706,6 +785,9 @@ try {
   if (pick('tools')) {
     console.log('\nFind, data dictionary, backup & restore');
     for (const E of engines) { try { await suiteFindDictBackup(E); } catch (e) { check(`tools ${E.type}`, false, e.stack); } }
+  }
+  if (pick('updater')) {
+    try { await suiteUpdater(); } catch (e) { check('updater suite', false, e.stack); }
   }
   if (pick('i18n')) {
     try { await suiteI18n(); } catch (e) { check('i18n suite', false, e.stack); }

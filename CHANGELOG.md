@@ -3,6 +3,21 @@
 All notable changes to DBStudio are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-11-03
+
+### Added
+
+- **In-app updates.** Every time DBStudio starts it checks GitHub Releases for a newer version. When there is one, a
+  dialog shows the installed and the new version side by side with the release notes, and **Upgrade now** does the rest:
+  - downloads the installer that matches this install (`.deb`, AppImage or Windows `.exe`) in the background with progress,
+  - verifies it against the release's `SHA256SUMS.txt` (a damaged or tampered file is deleted, never installed),
+  - installs it — `.deb` through the system password prompt (pkexec), AppImage by replacing the file, Windows by
+    starting the installer — and restarts DBStudio on the new version.
+  - **Later** only closes the dialog: it appears again on the next start until DBStudio is updated. Meanwhile a chip in
+    the status bar and a dot on the settings gear keep the update one click away.
+  - **Settings → Updates** shows the installed version and checks on demand.
+  - Running from source (`npm start`), the dialog links to the release page and shows the `git pull` command instead.
+
 ## [0.4.2] — 2026-11-03
 
 ### Fixed
@@ -101,6 +116,7 @@ First public release.
 - Server tools: process list, variables, status, users & privileges.
 - Desktop app for Linux (`.deb`, AppImage) and Windows (installer), with an About page.
 
+[0.5.0]: https://github.com/firexsantos/dbstudio/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/firexsantos/dbstudio/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/firexsantos/dbstudio/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/firexsantos/dbstudio/compare/v0.3.0...v0.4.0

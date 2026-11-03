@@ -1,5 +1,5 @@
 // Settings: interface language and appearance. Saved server-side in ~/.dbstudio/settings.json.
-import { h, icon, api, app, state, toast, modal, copyText, confirmDialog, local } from './core.js';
+import { h, icon, esc, api, app, state, toast, modal, copyText, confirmDialog, local } from './core.js';
 import { t, LANG, LANGUAGES } from './i18n.js';
 
 // An older server process (started before an update) has no /api/settings yet.
@@ -83,6 +83,12 @@ export async function openSettings() {
     section('languages', t('Language'), t('Used for menus, dialogs and messages. English is the default.'), langBox),
     section('palette', t('Appearance'), t('Pick a theme, or let DBStudio follow your system.'), themeBox),
     section(
+      'rocket',
+      t('Updates'),
+      t('DBStudio checks for a new version every time it starts.'),
+      updatesRow(),
+    ),
+    section(
       'folder-cog',
       t('Data folder'),
       t('Connections, settings and backups are stored here, on this computer only.'),
@@ -90,6 +96,26 @@ export async function openSettings() {
     ),
   );
   modal({ title: t('Settings'), sub: t('Preferences for this computer'), icon: 'settings', size: 'wide st-modal', body, actions: ['spacer', { label: t('Done'), kind: 'primary' }] });
+}
+
+function updatesRow() {
+  const status = h('div', { class: 'st-upd-status' });
+  const paint = () => {
+    const u = state.update;
+    status.innerHTML = u?.available
+      ? `${icon('sparkles')} <span>${esc(t('Version {latest} is available — you have {current}.', { latest: u.latest, current: u.current }))}</span>`
+      : `${icon('badge-check')} <span>${esc(u ? t('Up to date — version {v}.', { v: u.current }) : t('Not checked yet.'))}</span>`;
+    status.classList.toggle('avail', Boolean(u?.available));
+  };
+  paint();
+  const btn = h('button', { class: 'btn sm', html: icon('refresh-cw') + `<span>${t('Check now')}</span>` });
+  btn.onclick = async () => {
+    btn.classList.add('loading');
+    await app.checkForUpdates({ force: true });
+    btn.classList.remove('loading');
+    paint();
+  };
+  return h('div', { class: 'st-row' }, status, btn);
 }
 
 async function switchLanguage(code, card) {
