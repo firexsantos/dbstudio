@@ -248,6 +248,28 @@ async function suiteEngine(E) {
   }, t, ns);
   check('add column → single ALTER (no rebuild)', addOnly.statements.length === 1 && /ADD COLUMN/i.test(addOnly.statements[0]), addOnly.statements.join(' | '));
 
+  // Designer "new table" with an unnamed relation + index, twice against the same parent: names must be generated
+  // per table (an unnamed FK used to become CONSTRAINT `null`, so the second table failed with MySQL errno 121).
+  const pfk = produk.foreignKeys[0];
+  const newTable = (name) => ({
+    name,
+    columns: [{ name: 'id', type: t === 'sqlite' ? 'INTEGER' : 'int', nullable: false, autoIncrement: true }, { name: 'ref_id', type: t === 'sqlite' ? 'INTEGER' : 'int', nullable: false }],
+    primaryKey: ['id'],
+    indexes: [{ name: null, columns: ['ref_id'], unique: false }],
+    foreignKeys: [{ name: null, columns: ['ref_id'], refTable: pfk.refTable, refColumns: pfk.refColumns, onDelete: 'NO ACTION', onUpdate: 'NO ACTION' }],
+  });
+  const n1 = schema.createTableStatements(newTable('nf_satu'), t, { ns });
+  const n2 = schema.createTableStatements(newTable('nf_dua'), t, { ns });
+  check('unnamed FK/index get generated names (no "null")', !/null[`"]/i.test([...n1, ...n2].join(' ')) && /nf_satu_ref_id_fkey/.test(n1.join(' ')), n1.join(' | '));
+  let twoOk = true;
+  try {
+    await db.execScript(conn, ns, n1, { transactional: false });
+    await db.execScript(conn, ns, n2, { transactional: false });
+  } catch (e) {
+    twoOk = e.message;
+  }
+  check('two new tables with unnamed relations to one parent', twoOk === true, String(twoOk));
+
   // round trip: recreate produk under a new name from its model
   const copyStmts = schema.createTableStatements(produk, t, { ns, srcNs: ns, name: 'produk_rt', fkMode: t === 'sqlite' ? 'inline' : 'alter' });
   await db.execScript(conn, ns, copyStmts, { transactional: false });
