@@ -174,6 +174,26 @@ export async function openDesigner(table = null) {
     if (showPreview) setTimeout(() => pv.refresh(), 50);
   };
 
+  // Shorthand some tools put next to a column (FK, PK, AI…) is not part of the data type; catch it here with a
+  // pointer to the right control instead of letting the server answer with a bare SQL syntax error.
+  const MARKERS = [
+    [/\b(fk|foreign\s+key|references)\b/i, () => t('create the link under Relations instead.')],
+    [/\b(pk|primary\s+key)\b/i, () => t('tick the PK box instead.')],
+    [/\b(ai|auto_?increment|identity)\b/i, () => t('tick the AI box instead.')],
+    [/\b(nn|not\s+null)\b/i, () => t('untick Null instead.')],
+    [/\b(uq|unique)\b/i, () => t('add a unique index instead.')],
+  ];
+  function typeProblem(c) {
+    if (!c.name.trim()) return null;
+    const ty = c.type.trim();
+    if (!ty) return t('Column "{col}" needs a data type.', { col: c.name.trim() });
+    for (const [re, hint] of MARKERS) {
+      const m = re.exec(ty);
+      if (m) return t('Column "{col}": "{word}" is not part of a data type — {hint}', { col: c.name.trim(), word: m[1], hint: hint() });
+    }
+    return null;
+  }
+
   // ---- model ↔ server
   function buildModel() {
     const ordered = cols.filter((c) => c.name.trim());
@@ -202,6 +222,10 @@ export async function openDesigner(table = null) {
   }
   async function generate() {
     const m = buildModel();
+    for (const c of cols) {
+      const problem = typeProblem(c);
+      if (problem) throw new Error(problem);
+    }
     if (table) return api('POST', `/api/c/${a.conn.id}/sql/alter-table`, { ns: a.ns, table, model: m });
     const r = await api('POST', `/api/c/${a.conn.id}/sql/create-table`, { ns: a.ns, model: m });
     return { statements: r.statements, warnings: [] };
@@ -256,7 +280,13 @@ export async function openDesigner(table = null) {
       const def = h('input', { class: 'input mono', value: c.defaultInput, placeholder: c.autoIncrement ? 'auto' : 'NULL', disabled: c.autoIncrement || Boolean(c.generated) });
       const com = h('input', { class: 'input', value: c.comment || '' });
       name.oninput = () => ((c.name = name.value), changed());
-      ty.oninput = () => ((c.type = ty.value), changed());
+      const mark = () => {
+        const p = typeProblem(c);
+        ty.classList.toggle('invalid', Boolean(p));
+        ty.title = p || '';
+      };
+      mark();
+      ty.oninput = () => ((c.type = ty.value), mark(), changed());
       def.oninput = () => ((c.defaultInput = def.value), changed());
       com.oninput = () => ((c.comment = com.value), changed());
       const del = h('button', { class: 'btn ghost xs icon danger', title: t('Delete column'), html: icon('x') });

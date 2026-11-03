@@ -1,7 +1,7 @@
 {
   "name": "dbstudio",
   "productName": "DBStudio",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Database manager for MySQL/MariaDB, PostgreSQL & SQLite — SSH tunnels, ERD, cross-server table copy, schema sync.",
   "author": {
     "name": "Firman Santosa",

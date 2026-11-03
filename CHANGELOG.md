@@ -3,6 +3,15 @@
 All notable changes to DBStudio are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] — 2026-11-03
+
+### Fixed
+
+- **Table designer: shorthand in the Type column is caught before running SQL.** Writing `int FK` (or PK, AI, NN, UQ,
+  `primary key`, `auto_increment`…) as a column type produced a bare MariaDB/MySQL syntax error. The designer now marks
+  the field in red and explains where it belongs — the Relations section, the PK/AI/Null boxes or a unique index —
+  and won't run the statement until it is fixed. An empty type is flagged the same way.
+
 ## [0.4.1] — 2026-11-03
 
 ### Fixed
@@ -92,6 +101,7 @@ First public release.
 - Server tools: process list, variables, status, users & privileges.
 - Desktop app for Linux (`.deb`, AppImage) and Windows (installer), with an About page.
 
+[0.4.2]: https://github.com/firexsantos/dbstudio/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/firexsantos/dbstudio/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/firexsantos/dbstudio/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/firexsantos/dbstudio/compare/v0.2.0...v0.3.0

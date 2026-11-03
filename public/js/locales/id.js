@@ -1176,4 +1176,11 @@ export default {
   "— skip —": "— lewati —",
   "•••••• saved": "•••••• tersimpan",
   "•••••• saved — leave empty to keep it": "•••••• tersimpan — kosongkan untuk tetap",
+  "create the link under Relations instead.": "buat relasinya di bagian Relasi.",
+  "tick the PK box instead.": "centang kotak PK.",
+  "tick the AI box instead.": "centang kotak AI.",
+  "untick Null instead.": "hilangkan centang Null.",
+  "add a unique index instead.": "tambahkan index unik.",
+  "Column \"{col}\" needs a data type.": "Kolom \"{col}\" perlu tipe data.",
+  "Column \"{col}\": \"{word}\" is not part of a data type — {hint}": "Kolom \"{col}\": \"{word}\" bukan bagian dari tipe data — {hint}",
 };

@@ -1367,3 +1367,6 @@ table.qb-grid { width: 100%; border-collapse: separate; border-spacing: 0 4px; }
 @keyframes ws-beam { from { height: 0; opacity: 0; } }
 @media (max-width: 900px) { #wsbar { margin-bottom: 6px; } #app.has-ws { --wsbar-h: 50px; } .ws-chip { max-width: 200px; } }
 @media (prefers-reduced-motion: reduce) { .ws-chip.on .ws-led, .ws-chip.born, .ws-chip.born::before { animation: none; } }
+
+/* invalid input (e.g. a column type the designer cannot use) */
+.input.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent); }
